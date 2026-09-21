@@ -7,11 +7,11 @@
 #
 # Run by the operator (the account that owns the server's tokens file).
 #   tenant  hands over the token stored in --token-file.
-#   own     generates a new token, backs up the tokens file, inserts the
-#           "<token> sandbox" line before the first [agent:*] section (or at
-#           the end if there is none), validates the resulting token lines and
-#           replaces the file atomically (0600). The server must then be
-#           restarted by hand; this script never restarts it.
+#   own     generates a new token, backs up the tokens file, appends a line
+#           containing ONLY the token (one token per line; the server reads
+#           each non-blank, non-comment line as one token) and replaces the
+#           file atomically (0600). The server must then be restarted by
+#           hand; this script never restarts it.
 # Both modes, as the account (sudo -u <account> -H): extract the kit into
 # ~/tmp, run install.sh, write ~/.config/vulpo/token (0600, token through
 # stdin) and run vlpmcp doctor. The token is never printed.
@@ -75,7 +75,7 @@ echo "  account:     $ACCOUNT"
 echo "  token mode:  $TOKEN_MODE"
 echo "  kit:         $KIT"
 if [[ "$TOKEN_MODE" == "own" ]]; then
-    echo "  tokens file: $TOKENS_FILE (backup + insert of a new '<token> sandbox' line)"
+    echo "  tokens file: $TOKENS_FILE (backup + append of a one-token line)"
     echo "               a server restart will be needed afterwards (not done here)"
 else
     echo "  token from:  $TOKEN_FILE"
@@ -90,37 +90,29 @@ fi
 
 # ---- token -------------------------------------------------------------------
 
-# validate_tokens_line enforces the server's "token label" format: exactly two
-# whitespace-separated fields, no comment or section characters.
-validate_tokens_line() {
-    local line="$1" fields
-    read -r -a fields <<<"$line"
-    [[ ${#fields[@]} -eq 2 ]] || return 1
-    [[ "$line" != *"#"* && "$line" != *"["* ]] || return 1
+# token_line_ok: the server's contract is one token per line — a token line is
+# non-empty, not a comment, and contains no whitespace (the line IS the token).
+token_line_ok() {
+    local line="$1"
+    [[ -n "$line" && "$line" != \#* && "$line" != *" "* && "$line" != *$'\t'* ]]
 }
 
-# insert_tokens_line prints <file> with <line> inserted before the first section
-# header ("[..."), or appended at the end if there is none: the server reads
-# every line after a section header as "key = value". The line travels through
-# the environment, not argv, so the token never shows up in the process list.
-insert_tokens_line() {
-    NEW_TOKENS_LINE="$2" awk '
-        !inserted && /^[[:space:]]*\[/ { print ENVIRON["NEW_TOKENS_LINE"]; inserted = 1 }
-        { print }
-        END { if (!inserted) print ENVIRON["NEW_TOKENS_LINE"] }
-    ' "$1"
-}
-
-# check_token_lines fails if a line before the first section header is neither
-# blank, a comment, nor exactly two fields; it prints that line's number, never
-# its content (it may hold a token).
-check_token_lines() {
+# validate_tokens_file fails if any line of <file> is neither blank, a comment,
+# nor a plausible single-token line; it prints that line's number, never its
+# content (it may hold a token).
+validate_tokens_file() {
     awk '
-        /^[[:space:]]*\[/ { exit }
         /^[[:space:]]*(#|$)/ { next }
-        NF != 2 { print NR; invalid = 1; exit }
+        /[[:space:]]/ { print NR; invalid = 1; exit }
         END { exit invalid }
     ' "$1"
+}
+
+# append_tokens_line prints <file> with <line> appended: the new line travels
+# through the environment, not argv, so the token never shows up in the
+# process list.
+append_tokens_line() {
+    NEW_TOKENS_LINE="$2" awk '{ print } END { print ENVIRON["NEW_TOKENS_LINE"] }' "$1"
 }
 
 TOKEN=""
@@ -131,17 +123,17 @@ if [[ "$TOKEN_MODE" == "tenant" ]]; then
 else
     TOKEN="$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
     [[ "$TOKEN" =~ ^[0-9a-f]{64}$ ]] || die "could not generate a 64-hex-digit token"
-    validate_tokens_line "$TOKEN sandbox" || die "generated tokens line is invalid; tokens file untouched"
+    token_line_ok "$TOKEN" || die "generated token is invalid; tokens file untouched"
 
     backup="$TOKENS_FILE.bak.$(date +%Y%m%d%H%M%S)"
     cp -p "$TOKENS_FILE" "$backup"
     chmod 600 "$backup"
     tmp="$(mktemp "$TOKENS_FILE.tmp.XXXXXX")"
     trap 'rm -f "$tmp"' EXIT
-    insert_tokens_line "$TOKENS_FILE" "$TOKEN sandbox" > "$tmp"
+    append_tokens_line "$TOKENS_FILE" "$TOKEN" > "$tmp"
     chmod 600 "$tmp"
-    bad_line="$(check_token_lines "$tmp")" \
-        || die "the resulting tokens file would have an invalid token line before the [agent:*] sections (line $bad_line is not '<token> <agent>'); tokens file untouched"
+    bad_line="$(validate_tokens_file "$tmp")" \
+        || die "the resulting tokens file would have an invalid token line (line $bad_line is not a single-token line); tokens file untouched"
     mv -f "$tmp" "$TOKENS_FILE"
     trap - EXIT
     echo "tokens file updated: $TOKENS_FILE (backup: $backup)"
