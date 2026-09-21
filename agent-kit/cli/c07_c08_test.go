@@ -19,7 +19,7 @@ func TestC7_UsageExit2(t *testing.T) {
 	env := newEnv(t, f.URL())
 
 	for _, args := range [][]string{{"no-such-subcommand"}, {"call"}} {
-		expectExit(t, runFbmcp(t, env, "", args...), 2)
+		expectExit(t, runVlpmcp(t, env, "", args...), 2)
 	}
 }
 
@@ -29,7 +29,7 @@ func TestC7_InvalidTokenExit7(t *testing.T) {
 	env := newEnv(t, f.URL())
 
 	for _, args := range [][]string{{"ping"}, {"tools"}, {"call", "vlp_listTabs"}} {
-		res := runFbmcp(t, env, "", args...)
+		res := runVlpmcp(t, env, "", args...)
 		expectExit(t, res, 7)
 		expectContains(t, "stderr", res.Stderr, "invalid token (401)")
 	}
@@ -42,7 +42,7 @@ func TestC7_HTTPStatusExit4(t *testing.T) {
 			f.set(func(f *fakeMCP) { f.callStatus = status })
 			env := newEnv(t, f.URL())
 
-			expectExit(t, runFbmcp(t, env, "", "call", "vlp_listTabs"), 4)
+			expectExit(t, runVlpmcp(t, env, "", "call", "vlp_listTabs"), 4)
 		})
 	}
 }
@@ -51,7 +51,7 @@ func TestC7_UnreachableExit8(t *testing.T) {
 	env := newEnv(t, unreachableURL(t))
 
 	for _, args := range [][]string{{"ping"}, {"call", "vlp_listTabs"}} {
-		expectExit(t, runFbmcp(t, env, "", args...), 8)
+		expectExit(t, runVlpmcp(t, env, "", args...), 8)
 	}
 }
 
@@ -61,7 +61,7 @@ func TestC7_TimeoutExit8(t *testing.T) {
 	env := newEnv(t, f.URL())
 	env.Vars["VLP_TIMEOUT"] = "1"
 
-	res := runFbmcp(t, env, "", "call", "vlp_listTabs")
+	res := runVlpmcp(t, env, "", "call", "vlp_listTabs")
 	expectExit(t, res, 8)
 	if res.Elapsed >= 8*time.Second {
 		t.Errorf("fb-021 %s: vlpmcp took %v with VLP_TIMEOUT=1 against a 10s handler", t.Name(), res.Elapsed)
@@ -109,7 +109,7 @@ func TestC8_TokenNeverEmitted(t *testing.T) {
 		{
 			name: "second 404",
 			setup: func(t *testing.T, f *fakeMCP, env *testEnv) {
-				runFbmcp(t, env, "", "call", "vlp_listTabs")
+				runVlpmcp(t, env, "", "call", "vlp_listTabs")
 				f.set(func(f *fakeMCP) { f.reject404 = true })
 			},
 			args: []string{"call", "vlp_listTabs"},
@@ -145,7 +145,7 @@ func TestC8_TokenNeverEmitted(t *testing.T) {
 			if sc.setup != nil {
 				sc.setup(t, f, env)
 			}
-			res := runFbmcp(t, env, sc.stdin, sc.args...)
+			res := runVlpmcp(t, env, sc.stdin, sc.args...)
 			outputs := []struct{ label, text string }{
 				{"stdout", res.Stdout},
 				{"stderr", res.Stderr},

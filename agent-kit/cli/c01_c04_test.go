@@ -21,7 +21,7 @@ func TestC1_TokenFileMissingExit3(t *testing.T) {
 	env.Vars["VLP_TOKEN_FILE"] = missing
 
 	for _, args := range [][]string{{"ping"}, {"call", "vlp_listTabs"}} {
-		res := runFbmcp(t, env, "", args...)
+		res := runVlpmcp(t, env, "", args...)
 		expectExit(t, res, 3)
 		expectContains(t, "stderr", res.Stderr, "token file not found: "+missing)
 	}
@@ -32,14 +32,14 @@ func TestC1_TokenFileDefaultPath(t *testing.T) {
 	env := newEnv(t, f.URL())
 	delete(env.Vars, "VLP_TOKEN_FILE")
 
-	res := runFbmcp(t, env, "", "ping")
+	res := runVlpmcp(t, env, "", "ping")
 	expectExit(t, res, 3)
 	expectContains(t, "stderr", res.Stderr, "token file not found: ")
 	expectContains(t, "stderr", res.Stderr, filepath.Join(".config", "vulpo", "token"))
 
 	writeFileMode(t, filepath.Join(env.Home, ".config", "vulpo", "token"), sentinelToken+"\n", 0o600)
 	f.resetRequests()
-	res = runFbmcp(t, env, "", "ping")
+	res = runVlpmcp(t, env, "", "ping")
 	expectExit(t, res, 0)
 	expectAllRequestsCarryToken(t, f.requests())
 }
@@ -51,7 +51,7 @@ func TestC1_TokenFileLooseModeExit3(t *testing.T) {
 			env := newEnv(t, f.URL())
 			writeFileMode(t, env.TokenFile, sentinelToken+"\n", mode)
 
-			res := runFbmcp(t, env, "", "ping")
+			res := runVlpmcp(t, env, "", "ping")
 			expectExit(t, res, 3)
 			expectContains(t, "stderr", res.Stderr, "token file must be mode 0600: "+env.TokenFile)
 		})
@@ -63,7 +63,7 @@ func TestC1_TokenTrimmedFromFile(t *testing.T) {
 	env := newEnv(t, f.URL())
 	writeFileMode(t, env.TokenFile, "\t  "+sentinelToken+"  \n\n", 0o600)
 
-	res := runFbmcp(t, env, "", "ping")
+	res := runVlpmcp(t, env, "", "ping")
 	expectExit(t, res, 0)
 	expectAllRequestsCarryToken(t, f.requests())
 }
@@ -84,7 +84,7 @@ func TestC1_NoFlagOrArgumentAcceptsToken(t *testing.T) {
 		{"call", "vlp_listTabs", "{}", argvToken},
 	}
 	for _, args := range cases {
-		res := runFbmcp(t, env, "", args...)
+		res := runVlpmcp(t, env, "", args...)
 		if res.Exit == 0 {
 			t.Errorf("fb-021 %s: vlpmcp %q exited 0: a token passed through argv was accepted", t.Name(), args)
 		}
@@ -106,7 +106,7 @@ func TestC2_URLFromEnv(t *testing.T) {
 	f := newFakeMCP(t)
 	env := newEnv(t, f.srv.URL+"/c2/custom-mcp")
 
-	res := runFbmcp(t, env, "", "ping")
+	res := runVlpmcp(t, env, "", "ping")
 	expectExit(t, res, 0)
 	reqs := f.requests()
 	if len(reqs) == 0 {
@@ -127,7 +127,7 @@ func TestC3_SessionPersistedMode0600(t *testing.T) {
 	f := newFakeMCP(t)
 	env := newEnv(t, f.URL())
 
-	res := runFbmcp(t, env, "", "call", "vlp_listTabs")
+	res := runVlpmcp(t, env, "", "call", "vlp_listTabs")
 	expectExit(t, res, 0)
 	reqs := f.requests()
 	if len(reqs) < 2 || reqs[0].Method != "initialize" {
@@ -149,7 +149,7 @@ func TestC3_SessionDefaultPathCreatesDir(t *testing.T) {
 	env := newEnv(t, f.URL())
 	delete(env.Vars, "VLP_SESSION_FILE")
 
-	res := runFbmcp(t, env, "", "call", "vlp_listTabs")
+	res := runVlpmcp(t, env, "", "call", "vlp_listTabs")
 	expectExit(t, res, 0)
 	issued := ""
 	if initReq := lastWithMethod(f.requests(), "initialize"); initReq != nil {
@@ -162,8 +162,8 @@ func TestC3_SessionReusedAcrossCalls(t *testing.T) {
 	f := newFakeMCP(t)
 	env := newEnv(t, f.URL())
 
-	expectExit(t, runFbmcp(t, env, "", "call", "vlp_listTabs"), 0)
-	expectExit(t, runFbmcp(t, env, "", "call", "vlp_listTabs"), 0)
+	expectExit(t, runVlpmcp(t, env, "", "call", "vlp_listTabs"), 0)
+	expectExit(t, runVlpmcp(t, env, "", "call", "vlp_listTabs"), 0)
 
 	reqs := f.requests()
 	if n := countMethod(reqs, "initialize"); n != 1 {
@@ -183,12 +183,12 @@ func TestC3_SessionReusedAcrossCalls(t *testing.T) {
 func TestC3_Reinitialize404Once(t *testing.T) {
 	f := newFakeMCP(t)
 	env := newEnv(t, f.URL())
-	expectExit(t, runFbmcp(t, env, "", "call", "vlp_listTabs"), 0)
+	expectExit(t, runVlpmcp(t, env, "", "call", "vlp_listTabs"), 0)
 
 	f.expireAllSessions() // server restart: the stored session is now unknown
 	f.resetRequests()
 
-	res := runFbmcp(t, env, "", "call", "vlp_listTabs")
+	res := runVlpmcp(t, env, "", "call", "vlp_listTabs")
 	expectExit(t, res, 0)
 	if got := stripOneNewline(res.Stdout); got != defaultCallText {
 		t.Errorf("fb-021 %s: stdout after retry = %q, want %q", t.Name(), got, defaultCallText)
@@ -216,12 +216,12 @@ func TestC3_Reinitialize404Once(t *testing.T) {
 func TestC3_Second404Exit4(t *testing.T) {
 	f := newFakeMCP(t)
 	env := newEnv(t, f.URL())
-	expectExit(t, runFbmcp(t, env, "", "call", "vlp_listTabs"), 0)
+	expectExit(t, runVlpmcp(t, env, "", "call", "vlp_listTabs"), 0)
 
 	f.set(func(f *fakeMCP) { f.reject404 = true })
 	f.resetRequests()
 
-	res := runFbmcp(t, env, "", "call", "vlp_listTabs")
+	res := runVlpmcp(t, env, "", "call", "vlp_listTabs")
 	expectExit(t, res, 4)
 	reqs := f.requests()
 	if n := countMethod(reqs, "initialize"); n != 1 {
@@ -244,7 +244,7 @@ func TestC4_HeadersOnEveryPOST(t *testing.T) {
 		{"tools"},
 		{"call", "vlp_getFrame", `{"tabId":1}`},
 	} {
-		expectExit(t, runFbmcp(t, env, "", args...), 0)
+		expectExit(t, runVlpmcp(t, env, "", args...), 0)
 	}
 
 	reqs := f.requests()
@@ -272,7 +272,7 @@ func TestC4_SSEResponseParsed(t *testing.T) {
 	f.set(func(f *fakeMCP) { f.sse = true })
 	env := newEnv(t, f.URL())
 
-	res := runFbmcp(t, env, "", "call", "vlp_listTabs")
+	res := runVlpmcp(t, env, "", "call", "vlp_listTabs")
 	expectExit(t, res, 0)
 	if got := stripOneNewline(res.Stdout); got != defaultCallText {
 		t.Errorf("fb-021 %s: stdout from an SSE response = %q, want %q", t.Name(), got, defaultCallText)

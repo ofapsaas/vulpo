@@ -151,7 +151,7 @@ func TestP14_TokenFileTrimmedCallExit0(t *testing.T) {
 			env := newEnv(t, f.URL())
 			writeFileMode(t, env.TokenFile, content, 0o600)
 
-			res := runFbmcp(t, env, "", "call", "vlp_listTabs")
+			res := runVlpmcp(t, env, "", "call", "vlp_listTabs")
 			expectExit(t, res, 0)
 			reqs := f.requests()
 			if len(reqs) == 0 {
@@ -188,7 +188,7 @@ func TestP15_P16_InvalidTokenFileExit3NoRequests(t *testing.T) {
 				env := newEnv(t, f.URL())
 				writeFileMode(t, env.TokenFile, tc.content, 0o600)
 
-				res := runFbmcp(t, env, cmd.stdin, cmd.args...)
+				res := runVlpmcp(t, env, cmd.stdin, cmd.args...)
 				// Outputs are not printed on failure (P16): report exit only.
 				if res.Exit != 3 {
 					t.Errorf("%s %s: P15: vlpmcp %q exit = %d, want 3", spec006, t.Name(), cmd.args, res.Exit)
@@ -223,7 +223,7 @@ func TestP17_DoctorInvalidTokenServerOkExit3(t *testing.T) {
 			env := newEnv(t, f.URL())
 			writeFileMode(t, env.TokenFile, tc.content, 0o600)
 
-			res := runFbmcp(t, env, "", "doctor")
+			res := runVlpmcp(t, env, "", "doctor")
 			if res.Exit != 3 {
 				t.Errorf("%s %s: P17: doctor exit = %d, want 3", spec006, t.Name(), res.Exit)
 			}
@@ -258,7 +258,7 @@ func TestP18_DoctorInvalidTokenServerUnreachableExit8(t *testing.T) {
 			env := newEnv(t, unreachableURL(t))
 			writeFileMode(t, env.TokenFile, tc.content, 0o600)
 
-			res := runFbmcp(t, env, "", "doctor")
+			res := runVlpmcp(t, env, "", "doctor")
 			if res.Exit != 8 {
 				t.Errorf("%s %s: P18: doctor exit = %d, want 8", spec006, t.Name(), res.Exit)
 			}

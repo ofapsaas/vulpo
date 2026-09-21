@@ -18,7 +18,7 @@ func p25Run(t *testing.T, extra []string, args ...string) runResult {
 	f := newFakeMCP(t)
 	f.set(func(f *fakeMCP) { f.callExtraTexts = extra })
 	env := newEnv(t, f.URL())
-	res := runFbmcp(t, env, "", args...)
+	res := runVlpmcp(t, env, "", args...)
 	expectExit(t, res, 0)
 	return res
 }

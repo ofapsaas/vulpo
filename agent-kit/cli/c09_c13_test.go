@@ -17,7 +17,7 @@ func TestC9_PingPrintsOK(t *testing.T) {
 	f := newFakeMCP(t)
 	env := newEnv(t, f.URL())
 
-	res := runFbmcp(t, env, "", "ping")
+	res := runVlpmcp(t, env, "", "ping")
 	expectExit(t, res, 0)
 	if got := stripOneNewline(res.Stdout); got != "ok" {
 		t.Errorf("fb-021 %s: stdout = %q, want %q", t.Name(), got, "ok")
@@ -45,7 +45,7 @@ func TestC10_DoctorAllOKExit0(t *testing.T) {
 	f := newFakeMCP(t)
 	env := newEnv(t, f.URL())
 
-	res := runFbmcp(t, env, "", "doctor")
+	res := runVlpmcp(t, env, "", "doctor")
 	expectExit(t, res, 0)
 	expectLine(t, "stdout", res.Stdout, "server: ok")
 	expectLine(t, "stdout", res.Stdout, "token: ok")
@@ -64,7 +64,7 @@ func TestC10_DoctorExtensionNotConnectedExit9(t *testing.T) {
 	})
 	env := newEnv(t, f.URL())
 
-	res := runFbmcp(t, env, "", "doctor")
+	res := runVlpmcp(t, env, "", "doctor")
 	expectExit(t, res, 9)
 	expectLine(t, "stdout", res.Stdout, "server: ok")
 	expectLine(t, "stdout", res.Stdout, "token: ok")
@@ -76,7 +76,7 @@ func TestC10_DoctorInvalidTokenExit7(t *testing.T) {
 	f.set(func(f *fakeMCP) { f.token = "fbtok-some-other-tenant" })
 	env := newEnv(t, f.URL())
 
-	res := runFbmcp(t, env, "", "doctor")
+	res := runVlpmcp(t, env, "", "doctor")
 	expectExit(t, res, 7)
 	expectLine(t, "stdout", res.Stdout, "server: ok")
 	expectLine(t, "stdout", res.Stdout, "token: invalid")
@@ -85,7 +85,7 @@ func TestC10_DoctorInvalidTokenExit7(t *testing.T) {
 func TestC10_DoctorServerUnreachableExit8(t *testing.T) {
 	env := newEnv(t, unreachableURL(t))
 
-	res := runFbmcp(t, env, "", "doctor")
+	res := runVlpmcp(t, env, "", "doctor")
 	expectExit(t, res, 8)
 	expectLine(t, "stdout", res.Stdout, "server: unreachable")
 }
@@ -95,7 +95,7 @@ func TestC10_DoctorTokenMissingExit3(t *testing.T) {
 	env := newEnv(t, f.URL())
 	env.Vars["VLP_TOKEN_FILE"] = filepath.Join(env.Dir, "absent", "token")
 
-	res := runFbmcp(t, env, "", "doctor")
+	res := runVlpmcp(t, env, "", "doctor")
 	expectExit(t, res, 3)
 	expectLine(t, "stdout", res.Stdout, "token: missing")
 }
@@ -115,7 +115,7 @@ func TestC11_LogLinesOnlyAllowedFields(t *testing.T) {
 	})
 	env := newEnv(t, f.URL())
 
-	res := runFbmcp(t, env, "", "call", "vlp_getFrame", `{"tabId":7,"note":"`+argValue+`"}`)
+	res := runVlpmcp(t, env, "", "call", "vlp_getFrame", `{"tabId":7,"note":"`+argValue+`"}`)
 	expectExit(t, res, 0)
 
 	logText := readFileOrEmpty(env.LogFile)
@@ -154,7 +154,7 @@ func TestC11_LogLinesOnlyAllowedFields(t *testing.T) {
 		}
 	}
 
-	expectExit(t, runFbmcp(t, env, "", "ping"), 0)
+	expectExit(t, runVlpmcp(t, env, "", "ping"), 0)
 	if after := len(nonEmptyLines(readFileOrEmpty(env.LogFile))); after <= len(lines) {
 		t.Errorf("fb-021 %s: log went from %d to %d lines after another request; want lines appended", t.Name(), len(lines), after)
 	}
@@ -227,7 +227,7 @@ func TestC12_StdioHandshake(t *testing.T) {
 	f.set(func(f *fakeMCP) { f.serverName = "vulpo-fake-c12" })
 	env := newEnv(t, f.URL())
 
-	res := runFbmcp(t, env, stdioHandshake, "mcp-stdio")
+	res := runVlpmcp(t, env, stdioHandshake, "mcp-stdio")
 	expectExit(t, res, 0)
 	if n := len(nonEmptyLines(res.Stdout)); n != 2 {
 		t.Errorf("fb-021 %s: got %d stdout lines, want 2 (initialize, tools/list; the notification yields none)\nstdout: %q", t.Name(), n, res.Stdout)
@@ -267,7 +267,7 @@ func TestC12_StdioSessionRetryOn404(t *testing.T) {
 	env := newEnv(t, f.URL())
 
 	stdin := stdioInitializeLine + `{"jsonrpc":"2.0","id":2,"method":"tools/list"}` + "\n"
-	res := runFbmcp(t, env, stdin, "mcp-stdio")
+	res := runVlpmcp(t, env, stdin, "mcp-stdio")
 	expectExit(t, res, 0)
 
 	list := findByID(parseStdioOutput(t, res.Stdout), float64(2))
@@ -288,7 +288,7 @@ func TestC12_StdioEOFExit0(t *testing.T) {
 	f := newFakeMCP(t)
 	env := newEnv(t, f.URL())
 
-	res := runFbmcp(t, env, "", "mcp-stdio")
+	res := runVlpmcp(t, env, "", "mcp-stdio")
 	expectExit(t, res, 0)
 	if lines := nonEmptyLines(res.Stdout); len(lines) != 0 {
 		t.Errorf("fb-021 %s: stdout on immediate EOF = %q, want nothing", t.Name(), res.Stdout)
@@ -303,7 +303,7 @@ func TestC13_VersionDefaultDev(t *testing.T) {
 	f := newFakeMCP(t)
 	env := newEnv(t, f.URL())
 
-	res := runFbmcp(t, env, "", "version")
+	res := runVlpmcp(t, env, "", "version")
 	expectExit(t, res, 0)
 	if got := stripOneNewline(res.Stdout); got != "dev" {
 		t.Errorf("fb-021 %s: stdout = %q, want %q", t.Name(), got, "dev")

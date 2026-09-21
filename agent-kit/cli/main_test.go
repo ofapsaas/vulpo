@@ -37,7 +37,7 @@ const (
 
 	noExtensionMsg = "No extension connected for token"
 
-	specRef = "docs/specs/fb-021-mvp/spec.md §3"
+	specRef = "docs/specs/cli/spec.md"
 )
 
 var (
@@ -79,7 +79,7 @@ func goBuild(out string, extra ...string) error {
 func requireBinary(t *testing.T) string {
 	t.Helper()
 	if vlpmcpBuildErr != nil {
-		t.Fatalf("fb-021 %s: vlpmcp does not build (%s): %v", t.Name(), specRef, vlpmcpBuildErr)
+		t.Fatalf("%s: vlpmcp does not build (%s): %v", t.Name(), specRef, vlpmcpBuildErr)
 	}
 	return vlpmcpBin
 }
@@ -147,7 +147,7 @@ type runResult struct {
 	Elapsed time.Duration
 }
 
-func runFbmcp(t *testing.T, env *testEnv, stdin string, args ...string) runResult {
+func runVlpmcp(t *testing.T, env *testEnv, stdin string, args ...string) runResult {
 	t.Helper()
 	return runBinary(t, requireBinary(t), env, stdin, args...)
 }

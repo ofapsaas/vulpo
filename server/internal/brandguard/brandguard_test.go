@@ -14,9 +14,22 @@ import (
 	"testing"
 )
 
-// brandPattern: construido por partes ("fox"+"bridge") para que este archivo
-// no contenga la marca literal y no se auto-matchee.
-var brandPattern = "fox" + "bridge"
+// brandNeedles: marcas vigiladas de la línea legacy, construidas por partes
+// para que este archivo no las contenga literal y no se auto-matchee:
+// "foxbridge" (producto origin) y "fbmcp" (nombre original del CLI —
+// review fb-022-004: el identificador camelCase runFbmcp escapó al sed de
+// 002; se vigilan ambos).
+var brandNeedles = []string{"fox" + "bridge", "fb" + "mcp"}
+
+// matchesBrand: alguna de las marcas vigiladas (case-insensitive).
+func matchesBrand(s string) bool {
+	for _, n := range brandNeedles {
+		if strings.Contains(s, n) {
+			return true
+		}
+	}
+	return false
+}
 
 func TestNoLegacyBrand(t *testing.T) {
 	// Raíz del repo: src/server/internal/brandguard → ../../.. = src/
@@ -55,7 +68,7 @@ func TestNoLegacyBrand(t *testing.T) {
 			}
 			// Guardián de basename: el nombre de CUALQUIER directorio no
 			// puede contener la marca (el selfFile se maneja más abajo).
-			if path != selfFile && strings.Contains(strings.ToLower(name), brandPattern) {
+			if path != selfFile && matchesBrand(strings.ToLower(name)) {
 				rel, _ := filepath.Rel(root, path)
 				violations = append(violations, rel+"/ (nombre de directorio)")
 			}
@@ -66,7 +79,7 @@ func TestNoLegacyBrand(t *testing.T) {
 		}
 		// Guardián de basename: el nombre de CUALQUIER archivo no puede
 		// contener la marca (case-insensitive).
-		if strings.Contains(strings.ToLower(name), brandPattern) {
+		if matchesBrand(strings.ToLower(name)) {
 			rel, _ := filepath.Rel(root, path)
 			violations = append(violations, rel+" (nombre de archivo)")
 		}
@@ -75,7 +88,7 @@ func TestNoLegacyBrand(t *testing.T) {
 			return err
 		}
 		for i, line := range strings.Split(string(data), "\n") {
-			if strings.Contains(strings.ToLower(line), brandPattern) {
+			if matchesBrand(strings.ToLower(line)) {
 				rel, _ := filepath.Rel(root, path)
 				violations = append(violations, rel+":"+fmtInt(i+1))
 			}

@@ -16,7 +16,7 @@ func TestC5_ToolsOneLinePerTool(t *testing.T) {
 	f := newFakeMCP(t)
 	env := newEnv(t, f.URL())
 
-	res := runFbmcp(t, env, "", "tools")
+	res := runVlpmcp(t, env, "", "tools")
 	expectExit(t, res, 0)
 
 	// First sentence of each fixture description (see ambiguity A2 on the period).
@@ -54,7 +54,7 @@ func TestC5_ToolsJSONRawArray(t *testing.T) {
 	f := newFakeMCP(t)
 	env := newEnv(t, f.URL())
 
-	res := runFbmcp(t, env, "", "tools", "--json")
+	res := runVlpmcp(t, env, "", "tools", "--json")
 	expectExit(t, res, 0)
 	expectJSONEqual(t, "stdout of tools --json", []byte(res.Stdout), defaultTools())
 }
@@ -63,7 +63,7 @@ func TestC5_ToolsSchema(t *testing.T) {
 	f := newFakeMCP(t)
 	env := newEnv(t, f.URL())
 
-	res := runFbmcp(t, env, "", "tools", "--schema", "vlp_getFrame")
+	res := runVlpmcp(t, env, "", "tools", "--schema", "vlp_getFrame")
 	expectExit(t, res, 0)
 	expectJSONEqual(t, "stdout of tools --schema", []byte(res.Stdout), defaultTools()[1]["inputSchema"])
 }
@@ -72,7 +72,7 @@ func TestC5_ToolsSchemaUnknownExit2(t *testing.T) {
 	f := newFakeMCP(t)
 	env := newEnv(t, f.URL())
 
-	res := runFbmcp(t, env, "", "tools", "--schema", "vlp_doesNotExist")
+	res := runVlpmcp(t, env, "", "tools", "--schema", "vlp_doesNotExist")
 	expectExit(t, res, 2)
 }
 
@@ -84,7 +84,7 @@ func TestC6_CallPrintsTextVerbatim(t *testing.T) {
 	f := newFakeMCP(t)
 	env := newEnv(t, f.URL())
 
-	res := runFbmcp(t, env, "", "call", "vlp_listTabs")
+	res := runVlpmcp(t, env, "", "call", "vlp_listTabs")
 	expectExit(t, res, 0)
 	if got := stripOneNewline(res.Stdout); got != defaultCallText {
 		t.Errorf("fb-021 %s: stdout = %q, want result.content[0].text as-is %q", t.Name(), got, defaultCallText)
@@ -103,7 +103,7 @@ func TestC6_CallArgsPositional(t *testing.T) {
 	f := newFakeMCP(t)
 	env := newEnv(t, f.URL())
 
-	res := runFbmcp(t, env, "", "call", "vlp_getFrame", `{"tabId":7,"filter":"x"}`)
+	res := runVlpmcp(t, env, "", "call", "vlp_getFrame", `{"tabId":7,"filter":"x"}`)
 	expectExit(t, res, 0)
 	call := lastWithMethod(f.requests(), "tools/call")
 	if call == nil {
@@ -116,7 +116,7 @@ func TestC6_CallArgsFromStdin(t *testing.T) {
 	f := newFakeMCP(t)
 	env := newEnv(t, f.URL())
 
-	res := runFbmcp(t, env, `{"tabId":9,"filter":"from-stdin"}`+"\n", "call", "vlp_getFrame", "-")
+	res := runVlpmcp(t, env, `{"tabId":9,"filter":"from-stdin"}`+"\n", "call", "vlp_getFrame", "-")
 	expectExit(t, res, 0)
 	call := lastWithMethod(f.requests(), "tools/call")
 	if call == nil {
@@ -134,7 +134,7 @@ func TestC6_JSONRPCErrorExit5(t *testing.T) {
 	})
 	env := newEnv(t, f.URL())
 
-	res := runFbmcp(t, env, "", "call", "vlp_listTabs")
+	res := runVlpmcp(t, env, "", "call", "vlp_listTabs")
 	expectExit(t, res, 5)
 	expectContains(t, "stderr", res.Stderr, "error -32000: "+noExtensionMsg)
 }
@@ -143,7 +143,7 @@ func TestC6_RawPrintsFullJSONRPCResponse(t *testing.T) {
 	f := newFakeMCP(t)
 	env := newEnv(t, f.URL())
 
-	res := runFbmcp(t, env, "", "call", "--raw", "vlp_listTabs")
+	res := runVlpmcp(t, env, "", "call", "--raw", "vlp_listTabs")
 	expectExit(t, res, 0)
 	var resp struct {
 		JSONRPC string          `json:"jsonrpc"`

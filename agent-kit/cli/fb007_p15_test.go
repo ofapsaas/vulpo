@@ -19,7 +19,7 @@ func TestFb007_P15_ClientTimeoutIsNotServerUnreachable(t *testing.T) {
 	env := newEnv(t, f.URL())
 	env.Vars["VLP_TIMEOUT"] = "1"
 
-	res := runFbmcp(t, env, "", "call", "vlp_listTabs")
+	res := runVlpmcp(t, env, "", "call", "vlp_listTabs")
 	expectExit(t, res, 8)
 	if !strings.Contains(res.Stderr, "no answer from server within 1s") {
 		t.Errorf("%s %s: P15: stderr = %q, want contener \"no answer from server within 1s\"", spec007, t.Name(), res.Stderr)
@@ -37,7 +37,7 @@ func TestFb007_P18_NoTimeoutEnvSlowServerSucceeds(t *testing.T) {
 	env := newEnv(t, f.URL())
 	delete(env.Vars, "VLP_TIMEOUT")
 
-	expectExit(t, runFbmcp(t, env, "", "call", "vlp_listTabs"), 0)
+	expectExit(t, runVlpmcp(t, env, "", "call", "vlp_listTabs"), 0)
 }
 
 // P18 (T-doc): docs/agents.md documenta el default 1800 de VLP_TIMEOUT.
@@ -56,7 +56,7 @@ func TestFb007_P15_ClosedPortStillServerUnreachable(t *testing.T) {
 	env := newEnv(t, unreachableURL(t))
 	env.Vars["VLP_TIMEOUT"] = "1"
 
-	res := runFbmcp(t, env, "", "call", "vlp_listTabs")
+	res := runVlpmcp(t, env, "", "call", "vlp_listTabs")
 	expectExit(t, res, 8)
 	if !strings.Contains(res.Stderr, "server unreachable") {
 		t.Errorf("%s %s: P15: puerto cerrado stderr = %q, want contener \"server unreachable\"", spec007, t.Name(), res.Stderr)
