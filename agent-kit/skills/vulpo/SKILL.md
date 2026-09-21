@@ -252,6 +252,21 @@ of the user who owns that token:
 Either way, the token was set up by onboarding and `vlpmcp` uses it; you never
 handle it.
 
+### Runtimes without native MCP (e.g. zot)
+
+A runtime with no native MCP support operates Vulpo directly through Bash —
+the CLI is the interface:
+
+```bash
+vlpmcp doctor                      # server/token/extension health
+vlpmcp tools                       # list the 34 tools
+vlpmcp call vlp_listTabs '{}'
+vlpmcp call search_read '{"model":"res.partner","domain":"[]","fields":"name","limit":5}'
+```
+
+Never hand-write HTTP against `/mcp`; never read the token file.
+
+
 ## 5. Security (write rules)
 
 - **Write** tools (`create/write/unlink/import_records/execute_kw`, and mutating
