@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Vulpo — Browser Bridge",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Conecta Firefox con agentes AI via WebSocket. Navegación de browser para agentes: tabs, DOM, acciones y Odoo.",
   "author": "Vulpo",
 
