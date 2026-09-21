@@ -1,0 +1,10 @@
+{
+  "name": "vulpo-odoo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Odoo session probe (fb-019-001) — sonda de sesión, clasificación de respuestas y agregación de detección; tests junto al código (convención fb-018-002).",
+  "scripts": {
+    "test": "node --test *.test.js"
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "manifest_version": 3,
+  "name": "Vulpo — Browser Bridge",
+  "version": "0.5.2",
+  "description": "Conecta Firefox con agentes AI via WebSocket. Navegación de browser para agentes: tabs, DOM, acciones y Odoo.",
+  "author": "Vulpo",
+
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "vulpo@example.com"
+    }
+  },
+
+  "permissions": [
+    "tabs",
+    "activeTab",
+    "scripting",
+    "cookies",
+    "storage",
+    "alarms"
+  ],
+
+  "host_permissions": [
+    "<all_urls>"
+  ],
+
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' ws: wss:"
+  },
+
+  "background": {
+    "scripts": ["session-probe-bundle.js", "nav-guard-bundle.js", "odoo-nav-guard-bundle.js", "frame-fold-bundle.js", "native-dialog-main.js", "background.js"]
+  },
+
+  "options_ui": {
+    "page": "options.html"
+  },
+
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Vulpo",
+    "default_icon": {
+      "16": "icons/icon-16.svg",
+      "48": "icons/icon-48.svg",
+      "128": "icons/icon-128.svg"
+    }
+  },
+
+  "icons": {
+    "16": "icons/icon-16.svg",
+    "48": "icons/icon-48.svg",
+    "128": "icons/icon-128.svg"
+  }
+}
