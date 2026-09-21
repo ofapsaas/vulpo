@@ -1,13 +1,13 @@
 ---
-name: odoo-web
-description: Odoo-specific recipes for navigating the webapp through the frame driver (getFrame/act) — installing a module from Apps, the "Save manually" pattern, adding lines to a document (many2one in a row), numeric fields (float, monetary, quantities: the user's convention, prefer the ORM tool `write`, measured examples), sending/confirming a document (workflow with state mutation), and when to use the ORM tools (`search_read`, `write`, etc.) instead of the browser. Complements the generic web-navigation skill (read/act loop, dialogs, state verification, combobox) with what is specific to Odoo's UI. Use together with web-navigation when the agent operates an Odoo instance through Vulpo.
+name: vulpo-odoo-web
+description: Odoo-specific recipes for navigating the webapp through the frame driver (getFrame/act) — installing a module from Apps, the "Save manually" pattern, adding lines to a document (many2one in a row), numeric fields (float, monetary, quantities: the user's convention, prefer the ORM tool `write`, measured examples), sending/confirming a document (workflow with state mutation), and when to use the ORM tools (`search_read`, `write`, etc.) instead of the browser. Complements the generic vulpo-web-navigation skill (read/act loop, dialogs, state verification, combobox) with what is specific to Odoo's UI. Use together with vulpo-web-navigation when the agent operates an Odoo instance through Vulpo.
 ---
 
-# Odoo — specific recipes on top of web-navigation
+# Odoo — specific recipes on top of vulpo-web-navigation
 
 This skill assumes you already know the generic navigation loop (read → decide →
 act → re-read, dialogs first, state verification, combobox) from the
-`web-navigation` skill. Here, only what is specific to Odoo's UI, verified on a
+`vulpo-web-navigation` skill. Here, only what is specific to Odoo's UI, verified on a
 real demo (installing Purchase, creating products, building an RFQ).
 
 Tool calls below are shown as `{"tool": ..., "arguments": ...}`: use your native
@@ -64,7 +64,7 @@ has no `[aria-invalid]` anywhere and the tab link carries no error class. Odoo
 marks invalid fields only with its own classes instead: `o_field_invalid` on
 the field widget and `o_invalid_cell` on one2many cells. Vulpo resolves
 this through a site-detected validity convention (see the generic
-`web-navigation` skill), so **the map already carries the affected fields as
+`vulpo-web-navigation` skill), so **the map already carries the affected fields as
 `invalidElements`/`invalidCount`** — no selector-based search of your own is
 needed.
 
@@ -90,7 +90,7 @@ There are **two branches**, and only one of them is free:
    (`act type`) and a `name` (possibly `""`). **Zero extra calls** — the N
    invalid fields all arrive in the one response that pressed Save.
 2. **Save disabled (`ok:false`, `disabled:true`).** No action was dispatched,
-   so there is no folded map to read (see `web-navigation` §1b: the fold only
+   so there is no folded map to read (see `vulpo-web-navigation` §1b: the fold only
    runs on `ok:true`). Reach `invalidElements` with **one** `getFrame` call on
    that same tab. Still far better than one `getDOM` per field, but it is
    **one call, not zero** — do not present it as free.
@@ -122,7 +122,7 @@ and `read[]`.
 
 For orders/documents with lines (e.g. RFQ, invoice): `Add a product` (or
 equivalent) creates a new row. That row's product field is a many2one
-combobox — apply the generic recipe from `web-navigation` §5 (type → re-read →
+combobox — apply the generic recipe from `vulpo-web-navigation` §5 (type → re-read →
 click option). Quantity and other numeric fields of the row are normal inputs
 inside the same freshly created row — remember to `getFrame` again after
 clicking the combobox option before touching the quantity cell, because adding
@@ -130,7 +130,7 @@ the row mutated the DOM.
 
 ## Numeric fields (float, monetary, quantities)
 
-See `web-navigation` §5c for the generic principle (the site interprets the text
+See `vulpo-web-navigation` §5c for the generic principle (the site interprets the text
 exactly as written, with its own separator convention). Here, what is specific to
 Odoo.
 
@@ -161,7 +161,7 @@ derived fields via `search_read` after writing.
 If `write` fails with `odoo_no_tab`, `odoo_detection_failed` or
 `odoo_tab_unreachable` and the fix in the section below does not help, use the UI
 path that follows. Since reading the convention also
-uses ORM tools, if they fail the same way apply `web-navigation` §5c points 2 and
+uses ORM tools, if they fail the same way apply `vulpo-web-navigation` §5c points 2 and
 3 (infer from an already formatted value showing both separators, or ask). If
 `write` fails for another reason (permissions, validation, plan mode), do not
 work around it through the interface: report the error.
@@ -175,7 +175,7 @@ reading the language on the server fails, `get_version` still responds but
 without those keys (never `null`). In that case, fall back to the three-call
 recipe below. The convention keys exist since 0.5.0, but this skill's full
 recipe — which also relies on the observation from `act type`/`fill`
-(`web-navigation` §3b) — requires extension **≥ 0.5.0**.
+(`vulpo-web-navigation` §3b) — requires extension **≥ 0.5.0**.
 
 **If `get_version` does not bring the three keys,** three-call recipe, **once per
 session** (no need to repeat it for each field):
@@ -259,7 +259,7 @@ frame → `type`) and quantity of a delivery move (click on the row → re-read 
 frame → `type`).
 
 **Verification and timing.** First check: the `value` of the `act type` response
-(see above and `web-navigation` §3b/§5c) — compare the number against the wanted
+(see above and `vulpo-web-navigation` §3b/§5c) — compare the number against the wanted
 one under the site's convention. In fields with a server onchange, the input
 keeps the raw text as typed until the server's response comes back, so if
 `settled:false` or `detached`, or if what matters is a derived value (not the
@@ -288,7 +288,7 @@ It happened once in 8 attempts; 0 in 7 controlled replicas (`C9s-*`, `C9x-*`,
 measured (the site's CSP blocks `eval`, so the field's internal state at that
 moment could not be inspected); **inferred**: Odoo restores the value the record
 had before applying the change while it silently processes the onchange, and that
-restoration was captured as if it were the final value. See `web-navigation` §5c
+restoration was captured as if it were the final value. See `vulpo-web-navigation` §5c
 for the generic case.
 
 ### Finding H: rewriting a field with the same number can leave the form marked dirty
@@ -372,7 +372,7 @@ you are actually filling next, for example:
 Same rule for `vlp_navigate` when you know you will act on the
 destination document right away (e.g. opening a record from a direct URL):
 pass `frame` narrowed the same way instead of a plain `navigate` followed by
-`getFrame`. See the `web-navigation` skill §1b for the general pattern, the
+`getFrame`. See the `vulpo-web-navigation` skill §1b for the general pattern, the
 `frameError` handling, and when the fold is not worth it.
 
 ## `getFrame`/`act` (logged-in session) vs. ORM tools (`search_read`, `write`, etc. — direct RPC)
@@ -430,4 +430,4 @@ Odoo tab of your token:
 ---
 
 To connect to Vulpo and see the catalog of available tools, load the
-`vulpo` skill. For the navigation loop itself, load `web-navigation`.
+`vulpo` skill. For the navigation loop itself, load `vulpo-web-navigation`.

@@ -14,7 +14,7 @@ First release of Vulpo.
   34 tools — 22 `vlp_*` browser tools and 12 Odoo tools with mcp.odoo surface
   parity (pagination envelope, formats, write gates).
 - Agent kit: `vlpmcp` CLI (tools/call/ping/doctor + `mcp-stdio` bridge),
-  English skills (`vulpo`, `web-navigation`, `odoo-web`), installer and
+  English skills (`vulpo`, `vulpo-web-navigation`, `vulpo-odoo-web`), installer and
   runtime registration integrations.
 - User documentation: getting started, agents, security, troubleshooting,
   generated tools reference (`cmd/gen-docs`) and this changelog.

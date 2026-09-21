@@ -15,7 +15,7 @@ writes.
 |---|---|
 | `~/.local/bin/vlpmcp` | The CLI (static binary). |
 | `~/.local/share/vulpo-agent-kit/<version>/` | The kit: skills, integrations, `VERSION`. |
-| `~/.config/opencode/skills/` | The skills `vulpo`, `web-navigation`, `odoo-web`, if OpenCode is present. Otherwise they stay in the kit directory and the installer prints where. |
+| `~/.config/opencode/skills/` | The skills `vulpo`, `vulpo-web-navigation`, `vulpo-odoo-web`, if OpenCode is present. Otherwise they stay in the kit directory and the installer prints where. |
 | `~/.config/vulpo/token` | The token, mode 0600, owned by the account. Written by onboarding, never by the agent. |
 | `~/.cache/vulpo/session` | The MCP session id (mode 0600), managed by `vlpmcp`. |
 

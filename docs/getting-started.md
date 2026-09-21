@@ -132,7 +132,7 @@ If `doctor` reports a problem, see [Troubleshooting](troubleshooting.md).
 ### Using the tools
 
 Agents should load the `vulpo` skill first (connection, catalog, security),
-then `web-navigation` for the frame driver loop and `odoo-web` on Odoo sites.
+then `vulpo-web-navigation` for the frame driver loop and `vulpo-odoo-web` on Odoo sites.
 The frame driver in short:
 
 ```bash

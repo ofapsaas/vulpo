@@ -1,5 +1,5 @@
 ---
-name: web-navigation
+name: vulpo-web-navigation
 description: Generic pattern for navigating and interacting with modern SPAs/webapps through an accessibility-tree frame driver (paginated ref map + actions by ref, like Vulpo's getFrame/act). Covers the read→decide→act→re-read loop, why refs go stale after the DOM mutates, how to resolve modal dialogs before any other action, how to verify a view's real state (never the tab title), and the generic combobox/autocomplete recipe type→re-read→click option. Not specific to any site: applies to any webapp exposing an equivalent frame driver (Odoo, Salesforce, React admin panels, etc.). Use when an agent needs to navigate/interact with a complex webapp via accessibility instead of brittle CSS selectors.
 ---
 
@@ -8,7 +8,7 @@ description: Generic pattern for navigating and interacting with modern SPAs/web
 This skill describes **how to navigate any SPA/webapp** using a frame driver: a
 tool that serializes the visible accessibility tree into a paginated map with
 stable refs (`getFrame`) and a tool that acts on those refs (`act`). It assumes
-no particular site — for Odoo specifics see the `odoo-web` skill; to connect and
+no particular site — for Odoo specifics see the `vulpo-odoo-web` skill; to connect and
 list Vulpo's tools see the `vulpo` skill.
 
 ## 1. The loop: read → decide → act → re-read

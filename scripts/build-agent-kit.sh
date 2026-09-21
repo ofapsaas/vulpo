@@ -98,7 +98,7 @@ Everything an agent account needs to use Vulpo (drive a Firefox browser
 through MCP) without ever handling the token:
 
 - \`bin/vlpmcp\`: the CLI and MCP stdio bridge (static linux/amd64 binary).
-- \`skills/\`: the \`vulpo\`, \`web-navigation\` and \`odoo-web\` skills.
+- \`skills/\`: the \`vulpo\`, \`vulpo-web-navigation\` and \`vulpo-odoo-web\` skills.
 - \`integrations/register-opencode.sh\`: registers \`vlpmcp mcp-stdio\` in OpenCode.
 - \`install.sh\`: installs the kit for the current user.
 

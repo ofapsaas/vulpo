@@ -1,6 +1,6 @@
 ---
 name: vulpo
-description: Operating guide for agents (private and support) that use the Vulpo MCP server. Explains how to connect (native MCP tools if the runtime registered them, otherwise the `vlpmcp` CLI — never raw HTTP and never the token), the 34 tools (22 `vlp_*` browser-control tools — including the frame driver getFrame/act — plus 12 unprefixed Odoo tools: search_read, search_count, write, unlink, create, export_records, import_records, execute_kw, list_models, list_fields, list_available_profiles, get_version) grouped by family, how to call them with examples, how to react to connection errors, the tenancy model (one token = one user's extension; a support agent using a user's token operates on THAT extension), and the security rules (plan/build for writes, SECURITY footer). Covers only connection/catalog/security — to navigate with getFrame/act also load the `web-navigation` skill (generic loop) and, if the site is Odoo, `odoo-web` (Odoo-specific recipes). Use when an agent needs to operate the Firefox extension or Odoo instances through Vulpo, or to support a connected user. Compatible with any LLM that loads markdown skills.
+description: Operating guide for agents (private and support) that use the Vulpo MCP server. Explains how to connect (native MCP tools if the runtime registered them, otherwise the `vlpmcp` CLI — never raw HTTP and never the token), the 34 tools (22 `vlp_*` browser-control tools — including the frame driver getFrame/act — plus 12 unprefixed Odoo tools: search_read, search_count, write, unlink, create, export_records, import_records, execute_kw, list_models, list_fields, list_available_profiles, get_version) grouped by family, how to call them with examples, how to react to connection errors, the tenancy model (one token = one user's extension; a support agent using a user's token operates on THAT extension), and the security rules (plan/build for writes, SECURITY footer). Covers only connection/catalog/security — to navigate with getFrame/act also load the `vulpo-web-navigation` skill (generic loop) and, if the site is Odoo, `vulpo-odoo-web` (Odoo-specific recipes). Use when an agent needs to operate the Firefox extension or Odoo instances through Vulpo, or to support a connected user. Compatible with any LLM that loads markdown skills.
 ---
 
 # Vulpo — Operating guide for agents
@@ -175,7 +175,7 @@ the records before repeating it.
 {tabId, url, frame?}` also takes `frame`. `waitMs`/`quietMs`
 (fb-020-002) only matter for `action:"type"`: they bound the wait while the
 written field is observed (default 5000/300 ms). For the usage loop, stale-ref
-handling and navigation recipes, load the **`web-navigation`** skill — here we
+handling and navigation recipes, load the **`vulpo-web-navigation`** skill — here we
 only document that they exist and their signature as part of the 34-tool
 catalog.
 
@@ -185,8 +185,8 @@ changes. When present, the same call also returns the `getFrame` payload for
 those parameters (nested under `frame`, or `frameError` if only the read
 failed), so one MCP call covers both the action and the re-read instead of
 two. This replaces the `act → getFrame → act → getFrame` pattern with one
-call per interaction — see the **`web-navigation`** skill §1b for the loop and
-an example, and the **`odoo-web`** skill for narrowing large forms. `frame`
+call per interaction — see the **`vulpo-web-navigation`** skill §1b for the loop and
+an example, and the **`vulpo-odoo-web`** skill for narrowing large forms. `frame`
 does not exist on `vlp_click`/`vlp_fill` (see the note below).
 
 **Modal dialogs (fb-018-004 + fb-018-007, requires extension ≥ 0.5.0).**
@@ -220,8 +220,8 @@ fb-020-001):**
 `type`; they never accompany `ok:false`. `nativeDialog` is the only exception to
 that rule: it can accompany both `ok:true` (only on `click`, dialog just
 detected) and `ok:false` (prompt already pending, on any `action`). For what
-`settled` asserts and how to use `value`, load **`web-navigation`** §3b/§5c;
-for full handling of native prompts, load **`web-navigation`** §3.
+`settled` asserts and how to use `value`, load **`vulpo-web-navigation`** §3b/§5c;
+for full handling of native prompts, load **`vulpo-web-navigation`** §3.
 
 **With `frame` (fb-020-008), the table above is unaffected — `frame` only adds
 a key on top.** The fold runs only when `ok:true`: every `ok:false` row above
@@ -231,7 +231,7 @@ for the requested parameters) or `frameError:{error}` (the action completed,
 only its own map read failed — re-read with `getFrame`, do not retry the
 action). With `action:"type"` and a fold, the top-level `settled` still
 covers only the written field; `frame.invalidation.settled` is the separate,
-document-wide temporal verdict. See **`web-navigation`** §1b for the loop this
+document-wide temporal verdict. See **`vulpo-web-navigation`** §1b for the loop this
 enables and the timeout budget to respect (worst case the action's own wait
 plus twice `frame.waitMs`).
 
@@ -283,9 +283,9 @@ Never hand-write HTTP against `/mcp`; never read the token file.
 ## 6. Advanced navigation and interaction
 
 To use the frame driver (`vlp_getFrame`/`vlp_act`) effectively in
-complex navigation, load the **`web-navigation`** skill (read/act loop, stale
+complex navigation, load the **`vulpo-web-navigation`** skill (read/act loop, stale
 refs, dialogs, state verification, combobox — generic for any webapp). If the
-site is Odoo, also load **`odoo-web`** (recipes specific to that UI). This skill
+site is Odoo, also load **`vulpo-odoo-web`** (recipes specific to that UI). This skill
 (`vulpo`) covers only connection, tool catalog and security — it does not
 duplicate those recipes.
 
