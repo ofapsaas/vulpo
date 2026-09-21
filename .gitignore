@@ -1,0 +1,19 @@
+# Git hygiene del repo de Vulpo
+node_modules/
+logs/
+server/bin/
+# binarios que un go build local puede dejar en el árbol
+agent-kit/cli/cli
+server/vlpsrv
+# tarballs del agent kit — generados por scripts/build-agent-kit.sh
+dist/
+*.xpi
+# artefactos temporales del dev harness
+.devharness-profile/
+.devharness-tokens.txt
+# marker del touch-loop del harness — dispara el reload de web-ext
+.harness-touch
+# bundle del frame serializer — generado por extension/frame/build-frame.sh
+extension/frame-serializer.js
+# bundle del módulo session-probe — generado por extension/odoo/build-probe.sh
+extension/session-probe-bundle.js

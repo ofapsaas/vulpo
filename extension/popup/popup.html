@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Vulpo</title>
+  <link rel="stylesheet" href="popup.css"/>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>🦊 Vulpo <span class="version">v0.5.0</span></h1>
+      <div class="status-bar">
+        <span id="indicator" class="status-dot disconnected"></span>
+        <span id="statusText">Cargando...</span>
+      </div>
+    </header>
+
+    <div class="stats">
+      <div class="stat"><span class="stat-label">Tab:</span> <span id="tabCount">-</span></div>
+      <div class="stat"><span class="stat-label">Cmds:</span> <span id="cmdCount">0</span></div>
+      <div class="stat"><span class="stat-label">Err:</span> <span id="errCount">0</span></div>
+    </div>
+
+    <h2>Bridges</h2>
+    <div id="bridgeList" class="bridge-list"></div>
+
+    <div class="footer">
+      <button id="killSwitch" class="btn danger">🔴 Desactivar</button>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

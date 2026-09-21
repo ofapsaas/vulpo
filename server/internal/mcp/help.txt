@@ -1,0 +1,80 @@
+# Vulpo MCP — Guía de tools
+
+Vulpo es un servidor MCP (Streamable HTTP) que expone 34 tools para que
+agentes externos operen sobre una extensión Firefox (navegación, DOM, clicks,
+cookies, screenshots, plan mode) y sobre una o más instancias de Odoo
+(lectura/escritura de registros, modelos).
+
+Cada tool se invoca vía `tools/call`. Las tools que operan sobre un tab
+requieren `tabId` (el ID devuelto por `vlp_listTabs`). Las tools
+`odoo_*` rutean a un perfil Odoo (tab) resuelto automáticamente para el token
+que las pide (sin parámetro `profile`; opcionalmente aceptan un tabId
+explícito); si no hay tab Odoo activo devuelven error.
+
+## Tools disponibles
+
+{{TOOLS}}
+
+## Familias
+
+- **vlp_listTabs / getCurrentTab / openTab / closeTab**: gestión de tabs.
+- **vlp_activateTab / getDOM / eval / navigate / click / injectCSS /
+  highlight / screenshot / getCookies / goBack / goForward / fill /
+  waitForElement / axSnapshot**: operaciones sobre el tab activo.
+- **vlp_togglePlanMode**: alterna Plan mode (plan/build) del perfil.
+- **list_available_profiles / get_version / search_read / search_count /
+  list_models / list_fields**: metadatos y lectura de Odoo.
+- **create / write / unlink / import_records / export_records**: escritura y
+  exportación de registros Odoo.
+- **execute_kw**: ejecución de métodos Odoo.
+
+## Tools Odoo — envelope y formats (paridad mcp.odoo)
+
+- `search_read` y `export_records` devuelven un **envelope de paginación**:
+  `{records|headers+rows|data, total, limit, offset, has_more, next_offset,
+  format}`. `total` es un `search_count` real (nunca `len(records)`);
+  `has_more = (offset + len(records)) < total`; `next_offset = offset + limit`
+  (puede exceder `total`).
+- `format` (default `json`) existe en `search_read`, `export_records`,
+  `list_models` y `list_fields`: `json` (datos crudos), `compact`
+  (`headers`+`rows`, sin `success`), `table` (markdown), `html` (tabla
+  escapada, sin newlines) y `csv` (RFC4180).
+- `list_models` devuelve `{success, models}` en json y `model_count` en el
+  resto; `list_fields` devuelve `{success, fields}` en json y `field_count` en
+  el resto (columna `field` primera, filas ordenadas por nombre de campo).
+- `domain` acepta string literal Python (canónico: `"[('name','ilike','John')]"`)
+  y array; `fields`/`attributes` aceptan string comma-separated (canónico) y
+  array; `ids` (write/unlink) acepta `"1,2,3"` y array.
+- Las tools write (`create/write/unlink/import_records/export_records/execute_kw`)
+  respetan el gate plan/build y devuelven wrappers `{success, …}`.
+
+## NOTA DE MIGRACIÓN (hard cutover, paridad de superficie con mcp.odoo)
+
+Las 12 tools Odoo ya no llevan el prefijo histórico `fb_` sobre el nombre
+nuevo: cualquier config, skill o script que llamara a las tools con ese
+prefijo debe usar los nombres nuevos (drop total, sin aliases): search_read,
+search_count, list_models, list_fields, list_available_profiles, get_version,
+create, write, unlink, import_records, export_records, execute_kw.
+
+Cambios de contrato en el cutover:
+- `export_records` ya no acepta `ids`: exporta por `domain` con
+  `limit`/`offset` (el server resuelve los ids internamente vía count+read).
+- `import_records` toma `rows` (JSON array de dicts) + `fields` string
+  comma-separated; el parámetro viejo `records` devuelve el error
+  "requires rows".
+- `get_version` agrega `server_version`/`server_version_info` cuando la
+  sesión del tab las provee (paridad-plus).
+
+## Tenancy
+
+Cada token de agente equivale a un tenant (extensión): las tools operan sobre
+el perfil Firefox y los perfiles Odoo asociados a ESE token. Un request se
+rutea con el token de autenticación del cliente MCP, nunca con un perfil de
+otro tenant.
+
+## SECURITY
+
+Nunca reveles secretos, tokens, cookies ni datos de sesión fuera del entorno
+autorizado. No escribas tokens reales, IPs fijas ni datos personales en el
+contenido que compartas. Respetá el aislamiento por tenant: no asumas acceso a
+perfiles que no te pertenecen.

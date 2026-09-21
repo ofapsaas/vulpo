@@ -1,0 +1,18 @@
+{
+  "name": "vulpo-frame",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Frame serializer (fb-017-001) — content script isolated-world que serializa el DOM accesible al contrato Frame.",
+  "dependencies": {
+    "dom-accessibility-api": "0.7.1"
+  },
+  "devDependencies": {
+    "jsdom": "30.0.1",
+    "esbuild": "0.28.2"
+  },
+  "scripts": {
+    "test": "node --test *.test.js",
+    "build": "esbuild index.js --bundle --format=iife --global-name=VulpoFrame --outfile=../frame-serializer.js"
+  }
+}
