@@ -50,8 +50,8 @@ func TestGetFrame_InputSchemaHasSettleParams(t *testing.T) {
 	for _, tl := range s.ListTools() {
 		names[tl.Name] = true
 	}
-	if len(names) != 34 {
-		t.Fatalf("el conteo de tools debe seguir en 34 (§1.4/§2.5: no se agrega ninguna tool); got %d", len(names))
+	if len(names) != 33 {
+		t.Fatalf("el conteo de tools debe seguir en 33 (fb-022: 21 vlp_* + 12 odoo; §1.4/§2.5: no se agrega ninguna tool); got %d", len(names))
 	}
 
 	_, schema := getFrameTool(t, s)

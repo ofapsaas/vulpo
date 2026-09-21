@@ -2,6 +2,13 @@
 
 All notable changes to Vulpo are documented here. Format: Keep a Changelog.
 
+## [0.5.2] — 2026-09-21
+
+### Removed
+
+- `vlp_togglePlanMode` — plan/build mode is now user-only (extension popup).
+  Agents cannot change it.
+
 ## [0.5.0] — 2026-09-21
 
 First release of Vulpo.

@@ -2,7 +2,7 @@
 
 # Tools reference
 
-Verbatim from the server's tool registry (34 tools: 22 `vlp_*` + 12 Odoo).
+Verbatim from the server's tool registry (33 tools: 21 `vlp_*` + 12 Odoo).
 
 ## Browser tools (vlp_*)
 
@@ -185,14 +185,6 @@ Take a screenshot of a browser tab.
 | Param | Type | Required |
 |---|---|---|
 | `tabId` | number | yes |
-
-### `vlp_togglePlanMode`
-
-Toggle Plan mode (plan/build) for an agent profile; returns {profileId, planMode}.
-
-| Param | Type | Required |
-|---|---|---|
-| `profileId` | string |  |
 
 ### `vlp_waitForElement`
 

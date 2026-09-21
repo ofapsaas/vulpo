@@ -1,6 +1,6 @@
 ---
 name: vulpo
-description: Operating guide for agents (private and support) that use the Vulpo MCP server. Explains how to connect (native MCP tools if the runtime registered them, otherwise the `vlpmcp` CLI — never raw HTTP and never the token), the 34 tools (22 `vlp_*` browser-control tools — including the frame driver getFrame/act — plus 12 unprefixed Odoo tools: search_read, search_count, write, unlink, create, export_records, import_records, execute_kw, list_models, list_fields, list_available_profiles, get_version) grouped by family, how to call them with examples, how to react to connection errors, the tenancy model (one token = one user's extension; a support agent using a user's token operates on THAT extension), and the security rules (plan/build for writes, SECURITY footer). Covers only connection/catalog/security — to navigate with getFrame/act also load the `vulpo-web-navigation` skill (generic loop) and, if the site is Odoo, `vulpo-odoo-web` (Odoo-specific recipes). Use when an agent needs to operate the Firefox extension or Odoo instances through Vulpo, or to support a connected user. Compatible with any LLM that loads markdown skills.
+description: Operating guide for agents (private and support) that use the Vulpo MCP server. Explains how to connect (native MCP tools if the runtime registered them, otherwise the `vlpmcp` CLI — never raw HTTP and never the token), the 33 tools (21 `vlp_*` browser-control tools — including the frame driver getFrame/act — plus 12 unprefixed Odoo tools: search_read, search_count, write, unlink, create, export_records, import_records, execute_kw, list_models, list_fields, list_available_profiles, get_version) grouped by family, how to call them with examples, how to react to connection errors, the tenancy model (one token = one user's extension; a support agent using a user's token operates on THAT extension), and the security rules (plan/build for writes, SECURITY footer). Covers only connection/catalog/security — to navigate with getFrame/act also load the `vulpo-web-navigation` skill (generic loop) and, if the site is Odoo, `vulpo-odoo-web` (Odoo-specific recipes). Use when an agent needs to operate the Firefox extension or Odoo instances through Vulpo, or to support a connected user. Compatible with any LLM that loads markdown skills.
 ---
 
 # Vulpo — Operating guide for agents
@@ -9,7 +9,7 @@ Vulpo is an **MCP server** that lets an agent operate, on one side, a
 **Firefox extension** (navigation, DOM, clicks, cookies, screenshots, plan mode)
 and, on the other, one or more **Odoo** instances (reading/writing records,
 models). This skill is **self-contained**: it describes how to connect and use
-the 34 tools.
+the 33 tools.
 
 ## 0. Setup (done by the human, not by you)
 
@@ -67,12 +67,12 @@ Pick the first option that applies:
 | exit 5, `error <code>: <message>` | The tool returned a JSON-RPC error | Read the message (bad arguments, unknown tool, domain error) and fix the call. |
 | exit 2 | Usage error (bad subcommand, unknown tool in `--schema`) | Fix the command; check `vlpmcp tools`. |
 
-## 2. The 34 tools by family
+## 2. The 33 tools by family
 
-The server registers **34 tools** (`vlpmcp tools` or your native tool list is the
+The server registers **33 tools** (`vlpmcp tools` or your native tool list is the
 authoritative list). They are grouped as follows:
 
-### `vlp_*` family — Firefox extension control (22)
+### `vlp_*` family — Firefox extension control (21)
 - **Tabs:** `vlp_listTabs`, `vlp_activateTab`, `vlp_getCurrentTab`,
   `vlp_openTab`, `vlp_closeTab`.
 - **Navigation:** `vlp_navigate`, `vlp_goBack`, `vlp_goForward`.
@@ -80,7 +80,8 @@ authoritative list). They are grouped as follows:
   `vlp_highlight`, `vlp_injectCSS`, `vlp_eval`, `vlp_axSnapshot`,
   `vlp_waitForElement`.
 - **Data:** `vlp_getCookies`, `vlp_screenshot`.
-- **Mode / help:** `vlp_togglePlanMode`, `vlp_help`.
+- **Help:** `vlp_help`.
+  Plan/build se cambia desde el popup de la extensión Vulpo (user-only; los agentes no pueden togglearlo).
 - **Frame driver (fb-017):** `vlp_getFrame` (read) — serializes the tab's accessible DOM into the paginated `Frame` contract (sections/read/do, stable refs) and includes `invalidation: {changedSinceLast}`; `vlp_act` (write, gated by plan/build) — runs click/type/focus/select on a `ref` from the map.
 
 > **Prefer `act`+`ref` over `vlp_click`/`vlp_fill`.** The latter two
@@ -259,7 +260,7 @@ the CLI is the interface:
 
 ```bash
 vlpmcp doctor                      # server/token/extension health
-vlpmcp tools                       # list the 34 tools
+vlpmcp tools                       # list the 33 tools
 vlpmcp call vlp_listTabs '{}'
 vlpmcp call search_read '{"model":"res.partner","domain":"[]","fields":"name","limit":5}'
 ```

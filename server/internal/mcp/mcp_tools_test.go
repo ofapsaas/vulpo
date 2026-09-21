@@ -1,10 +1,9 @@
 // Package mcp tests — port de src/tests/mcp-tools-*.test.mjs + mcp-binding
-// (fb-007-005-mcp-server, PC-10..PC-15). Las 20 tools con mockHub
-// (fb-013-001 agrega vlp_togglePlanMode, PC4).
+// (fb-007-005-mcp-server, PC-10..PC-15). Las 21 tools browser con mockHub
+// (fb-022: togglePlanMode eliminado — plan/build es user-only).
 package mcp
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -84,7 +83,7 @@ func (m *MockHub) lastCall() (string, Command) {
 	return c.profileID, c.cmd
 }
 
-// toolsTable: las 34 tools (name → command wire esperado + tabId requerido).
+// toolsTable: las 33 tools (name → command wire esperado + tabId requerido).
 // Las 12 tools odoo (fb-019-002 — paridad de superficie con mcp.odoo: drop del
 // prefijo fb_, hard cutover D-7) rutean vía registry odooregistry, no command
 // directo — se cubren en mcp_odoo_*_tools_test.go (TestCommandWire las salta
@@ -116,7 +115,6 @@ var toolsTable = []struct {
 	{"vlp_fill", "fill", true, false},
 	{"vlp_waitForElement", "waitForElement", true, false},
 	{"vlp_axSnapshot", "axSnapshot", true, false},
-	{"vlp_togglePlanMode", "togglePlanMode", false, false}, // opera por perfil/token, sin tabId (PC4)
 	{"list_available_profiles", "", false, true},                 // no routea command; Detect+List del registry (PC6)
 	{"get_version", "odooGetVersion", true, true},
 	{"search_read", "odooSearchRead", true, true},
@@ -155,8 +153,8 @@ func TestAllTools_Registered(t *testing.T) {
 			t.Fatalf("tool %s sin inputSchema", tl.Name)
 		}
 	}
-	if len(names) != 34 {
-		t.Fatalf("tools registradas = %d, want 34", len(names))
+	if len(names) != 33 {
+		t.Fatalf("tools registradas = %d, want 33", len(names))
 	}
 	for _, tt := range toolsTable {
 		if !names[tt.name] {
@@ -302,7 +300,7 @@ func TestHelp_DefaultEmbed(t *testing.T) {
 	}
 	res := resp.(map[string]any)["result"].(map[string]any)
 	text := res["content"].([]any)[0].(map[string]any)["text"].(string)
-	// {{TOOLS}} resuelto a las 34 tools (presencia de algunas representativas).
+	// {{TOOLS}} resuelto a las 33 tools (presencia de algunas representativas).
 	// F-3 (fb-019-002, P19/D-7 hard cutover): positivo por el nombre nuevo +
 	// NEGATIVA de cualquier "fb_odoo_" (la positiva sola sería verde-vacuo:
 	// "search_read" es substring de "fb_odoo_search_read").
@@ -318,80 +316,5 @@ func TestHelp_DefaultEmbed(t *testing.T) {
 	}
 }
 
-// PC4 (fb-013-001) — vlp_togglePlanMode registrada y wireada: hub recibe
-// togglePlanMode con el profileID correcto (viaja como argumento), sin tabId.
-func TestTogglePlanMode_RegisteredAndWire(t *testing.T) {
-	s, hub := newTools(t)
-	resp, _ := s.HandleRequest(map[string]any{
-		"id": 1, "method": "tools/call",
-		"params": map[string]any{
-			"name":      "vlp_togglePlanMode",
-			"arguments": map[string]any{"profileId": "tok1"},
-		},
-	}, "tok1")
-	if _, hasErr := resp.(map[string]any)["error"]; hasErr {
-		t.Fatalf("togglePlanMode → error inesperado: %v", resp)
-	}
-	profileID, cmd := hub.lastCall()
-	if profileID != "tok1" {
-		t.Fatalf("profileID = %s, want tok1", profileID)
-	}
-	if cmd.Command != "togglePlanMode" {
-		t.Fatalf("command = %q, want togglePlanMode", cmd.Command)
-	}
-	if cmd.TabID != "" {
-		t.Fatalf("togglePlanMode con tabId indebido: %q", cmd.TabID)
-	}
-}
 
-// PC4 (fb-013-001) — el hub relay {profileId, planMode} al content JSON del resultado.
-func TestTogglePlanMode_RelaysPlanMode(t *testing.T) {
-	s, hub := newTools(t)
-	hub.result = map[string]any{"profileId": "tok1", "planMode": false}
-	resp, _ := s.HandleRequest(map[string]any{
-		"id": 1, "method": "tools/call",
-		"params": map[string]any{
-			"name":      "vlp_togglePlanMode",
-			"arguments": map[string]any{"profileId": "tok1"},
-		},
-	}, "tok1")
-	if _, hasErr := resp.(map[string]any)["error"]; hasErr {
-		t.Fatalf("togglePlanMode → error inesperado: %v", resp)
-	}
-	res := resp.(map[string]any)["result"].(map[string]any)
-	text := res["content"].([]any)[0].(map[string]any)["text"].(string)
-	var inner map[string]any
-	_ = json.Unmarshal([]byte(text), &inner)
-	if inner["profileId"] != "tok1" {
-		t.Fatalf("result profileId = %v, want tok1", inner["profileId"])
-	}
-	if inner["planMode"] != false {
-		t.Fatalf("result planMode = %v, want false", inner["planMode"])
-	}
-}
 
-// PC4 (fb-013-001) — toggle doble devuelve valores distintos (plan→build→plan).
-func TestTogglePlanMode_DistinctValues(t *testing.T) {
-	s, hub := newTools(t)
-	call := func() map[string]any {
-		resp, _ := s.HandleRequest(map[string]any{
-			"id": 1, "method": "tools/call",
-			"params": map[string]any{
-				"name":      "vlp_togglePlanMode",
-				"arguments": map[string]any{"profileId": "tok1"},
-			},
-		}, "tok1")
-		res := resp.(map[string]any)["result"].(map[string]any)
-		text := res["content"].([]any)[0].(map[string]any)["text"].(string)
-		var inner map[string]any
-		_ = json.Unmarshal([]byte(text), &inner)
-		return inner
-	}
-	hub.result = map[string]any{"profileId": "tok1", "planMode": false}
-	first := call()
-	hub.result = map[string]any{"profileId": "tok1", "planMode": true}
-	second := call()
-	if first["planMode"] == second["planMode"] {
-		t.Fatalf("toggle doble devolvió mismo planMode %v == %v (want distintos)", first["planMode"], second["planMode"])
-	}
-}

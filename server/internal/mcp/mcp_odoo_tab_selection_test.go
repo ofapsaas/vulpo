@@ -494,8 +494,8 @@ func fb006Initialize(t *testing.T, s *Server) map[string]any {
 	}
 	res, _ := resp.(map[string]any)["result"].(map[string]any)
 	si, _ := res["serverInfo"].(map[string]any)
-	if si["name"] != "vulpo" || si["version"] != "0.5.0" {
-		t.Fatalf("P19: serverInfo = %v, want vulpo 0.5.0 sin cambios", si)
+	if si["name"] != "vulpo" || si["version"] != "0.5.2" {
+		t.Fatalf("P19: serverInfo = %v, want vulpo 0.5.2 sin cambios", si)
 	}
 	return res
 }

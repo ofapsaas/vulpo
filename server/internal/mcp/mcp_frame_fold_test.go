@@ -106,8 +106,8 @@ func TestPostcondition1_FrameDeclaredInSchemas(t *testing.T) {
 	for _, tl := range s.ListTools() {
 		names[tl.Name] = true
 	}
-	if len(names) != 34 {
-		t.Fatalf("P1: el conteo de tools debe seguir en 34 (el pliegue no agrega tools); got %d", len(names))
+	if len(names) != 33 {
+		t.Fatalf("P1: el conteo de tools debe seguir en 33 (fb-022: 21 vlp_* + 12 odoo; el pliegue no agrega tools); got %d", len(names))
 	}
 
 	// Guarda de no-vacuidad por tool: los parámetros vigentes siguen declarados

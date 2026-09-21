@@ -19,7 +19,7 @@ import (
 )
 
 // version es la version del server.
-const version = "0.5.0"
+const version = "0.5.2"
 
 // agentKitRevision: short sha del último commit que tocó agent-kit/.
 // La inyecta scripts/build-server.sh con -X main.agentKitRevision=<sha>;

@@ -53,8 +53,8 @@ func TestDocsToolsExist(t *testing.T) {
 		t.Fatal(err)
 	}
 	names := catalogNames(catalog)
-	if len(names) != 34 {
-		t.Fatalf("catálogo inesperado: %d tools (esperado 34)", len(names))
+	if len(names) != 33 {
+		t.Fatalf("catálogo inesperado: %d tools (esperado 33)", len(names))
 	}
 	root := repoRoot(t)
 	files := scanTargets(t, root)

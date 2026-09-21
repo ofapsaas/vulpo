@@ -9,7 +9,7 @@ for tabs, DOM, safe actions and Odoo sessions.
 | Component | What it is |
 |---|---|
 | `extension/` | Firefox extension (MV3): WebSocket bridge, frame driver, nav-guard, Odoo session probe. |
-| `server/` | Go server (`vlpsrv`): WS `/extension` + MCP Streamable HTTP at `/mcp`, 34 tools (22 `vlp_*` + 12 Odoo). |
+| `server/` | Go server (`vlpsrv`): WS `/extension` + MCP Streamable HTTP at `/mcp`, 33 tools (21 `vlp_*` + 12 Odoo). |
 | `agent-kit/` | Agent kit: CLI `vlpmcp` (MCP stdio ↔ Streamable HTTP), skills and integrations. |
 | `scripts/` | Builds: `build-server.sh`, `build-xpi.sh`, `build-agent-kit.sh`, `onboard-agent.sh`. |
 | `docs/` | Getting started, agents, security, troubleshooting. |

@@ -1,8 +1,8 @@
 # Vulpo MCP — Tools guide
 
-Vulpo is an MCP server (Streamable HTTP) exposing 34 tools for external
+Vulpo is an MCP server (Streamable HTTP) exposing 33 tools for external
 agents to operate a Firefox extension (navigation, DOM, clicks, cookies,
-screenshots, plan mode) and one or more Odoo instances (record
+screenshots) and one or more Odoo instances (record
 read/write, models).
 
 Every tool is invoked via `tools/call`. Tools that operate on a tab require
@@ -21,7 +21,6 @@ active Odoo tab they return an error.
 - **vlp_activateTab / getDOM / eval / navigate / click / injectCSS /
   highlight / screenshot / getCookies / goBack / goForward / fill /
   waitForElement / axSnapshot**: operations on the active tab.
-- **vlp_togglePlanMode**: toggles the profile's Plan mode (plan/build).
 - **list_available_profiles / get_version / search_read / search_count /
   list_models / list_fields**: Odoo metadata and reads.
 - **create / write / unlink / import_records / export_records**: Odoo record

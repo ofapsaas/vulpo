@@ -215,8 +215,8 @@ func TestOdooTools_AllRegistered(t *testing.T) {
 			t.Fatalf("tool %s sin inputSchema", tl.Name)
 		}
 	}
-	if len(names) != 34 {
-		t.Fatalf("tools registradas = %d, want 34 (22 vlp_* + 12 odoo renombradas fb-019-002)", len(names))
+	if len(names) != 33 {
+		t.Fatalf("tools registradas = %d, want 33 (21 vlp_* + 12 odoo renombradas fb-019-002)", len(names))
 	}
 	for _, name := range odooToolsTable {
 		if !names[name] {

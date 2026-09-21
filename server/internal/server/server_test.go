@@ -166,8 +166,8 @@ func TestMCP_Initialize(t *testing.T) {
 	}
 	result, _ := resp["result"].(map[string]any)
 	si, _ := result["serverInfo"].(map[string]any)
-	if si["name"] != "vulpo" || si["version"] != "0.5.0" {
-		t.Fatalf("serverInfo = %v, want vulpo 0.5.0", si)
+	if si["name"] != "vulpo" || si["version"] != "0.5.2" {
+		t.Fatalf("serverInfo = %v, want vulpo 0.5.2", si)
 	}
 	if pv, _ := result["protocolVersion"].(string); pv != "2025-06-18" {
 		t.Fatalf("protocolVersion = %v, want 2025-06-18", pv)
@@ -259,7 +259,7 @@ func TestServer_Close(t *testing.T) {
 // Transporte Streamable HTTP — tools catalog y transporte.
 // ============================================================================
 
-// PC-06 — tools/list con sesión → exactamente 34 tools (22 vlp_ + 12 odoo).
+// PC-06 — tools/list con sesión → exactamente 33 tools (21 vlp_ + 12 odoo).
 func TestMCP_ToolsList(t *testing.T) {
 	s := newTestServer(t, []string{"tok1"})
 	_, _, sess := mcpInitialize(t, s.Port, "tok1")
@@ -276,8 +276,8 @@ func TestMCP_ToolsList(t *testing.T) {
 		t.Fatal(err)
 	}
 	tools, _ := resp["result"].(map[string]any)["tools"].([]any)
-	if len(tools) != 34 {
-		t.Fatalf("tools count = %d, want 34 (22 vlp_ + 12 odoo)", len(tools))
+	if len(tools) != 33 {
+		t.Fatalf("tools count = %d, want 33 (21 vlp_ + 12 odoo)", len(tools))
 	}
 	vlpCount, odooCount := 0, 0
 	for _, tl := range tools {
@@ -295,8 +295,8 @@ func TestMCP_ToolsList(t *testing.T) {
 			odooCount++
 		}
 	}
-	if vlpCount != 22 || odooCount != 12 {
-		t.Fatalf("catalog = %d vlp_ + %d odoo, want 22 + 12", vlpCount, odooCount)
+	if vlpCount != 21 || odooCount != 12 {
+		t.Fatalf("catalog = %d vlp_ + %d odoo, want 21 + 12", vlpCount, odooCount)
 	}
 }
 
@@ -611,7 +611,7 @@ func TestEpic_CrossFeature_AgentConnects(t *testing.T) {
 		t.Fatal("initialize no devolvió sesión (transporte)")
 	}
 
-	// tools/list devuelve las 34 tools (22 vlp_ + 12 odoo).
+	// tools/list devuelve las 33 tools (21 vlp_ + 12 odoo).
 	code, body, _ := mcpRequestFull(t, s.Port, mcpReqOpts{token: "tokA", session: sessA},
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
 	if code != 200 {
@@ -622,8 +622,8 @@ func TestEpic_CrossFeature_AgentConnects(t *testing.T) {
 		t.Fatal(err)
 	}
 	tools, _ := resp["result"].(map[string]any)["tools"].([]any)
-	if len(tools) != 34 {
-		t.Fatalf("tools/list count = %d, want 34 (22 vlp_ + 12 odoo)", len(tools))
+	if len(tools) != 33 {
+		t.Fatalf("tools/list count = %d, want 33 (21 vlp_ + 12 odoo)", len(tools))
 	}
 
 	// vlp_help resuelto: devuelve guía con {{TOOLS}}.

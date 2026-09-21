@@ -3,7 +3,8 @@
 // es server-only (no toca el hub). fb-013-001 agrega togglePlanMode (20);
 // fb-013-003 agrega las tools odoo (26); fb-017-002 las 2 de frame (34);
 // fb-019-002 renombra la familia odoo (drop del prefijo fb_ — paridad con
-// mcp.odoo): total 34 = 20 vlp_* + 2 frame + 12 odoo_*.
+// mcp.odoo). fb-022 elimina togglePlanMode (plan/build user-only, popup de
+// la extensión): total 33 = 21 vlp_* + 12 odoo_*.
 package mcp
 
 import (
@@ -91,7 +92,7 @@ func validateFrameKeys(frameValue any) error {
 	return nil
 }
 
-// RegisterAllTools: registra las 34 tools (20 vlp_* + 2 frame fb-017 +
+// RegisterAllTools: registra las 33 tools (19 vlp_* + 2 frame fb-017 +
 // 12 odoo_* — fb-019-002, sin prefijo fb_) contra el hub. El registry
 // odooregistry (fb-013-003) lo usan las tools odoo.
 func RegisterAllTools(s *Server, hub Hub, helpFile string, odoo *odooregistry.Registry) {
@@ -399,23 +400,6 @@ func RegisterAllTools(s *Server, hub Hub, helpFile string, odoo *odooregistry.Re
 		Handler: func(params map[string]any, token string) (any, error) {
 			t := tabID(params)
 			return hub.Command(token, Command{Command: "axSnapshot", Params: map[string]any{"tabId": t}, TabID: t})
-		},
-	})
-
-	s.RegisterTool(Tool{
-		Name: "vlp_togglePlanMode", Description: "Toggle Plan mode (plan/build) for an agent profile; returns {profileId, planMode}.",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"profileId": map[string]any{"type": "string", "description": "Profile ID to toggle (optional; defaults to the request's token profile)"},
-			},
-		},
-		Handler: func(params map[string]any, token string) (any, error) {
-			profileId := strArg(params, "profileId")
-			if profileId == "" {
-				profileId = token
-			}
-			return hub.Command(token, Command{Command: "togglePlanMode", Params: map[string]any{"profileId": profileId}})
 		},
 	})
 

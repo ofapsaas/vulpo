@@ -191,18 +191,21 @@ console.log('ok');
 
 func contains(s, sub string) bool { return len(sub) == 0 || bytes.Contains([]byte(s), []byte(sub)) }
 
-// ensureBuildMode: togglea a build (planMode:false) hasta lograrlo. El toggle de
-// la extensión es stateful (flip por llamada) → hasta 2 toggles garantizan build.
-// Requerido antes de las tools write/exec gated por WRITE_TOOLS en la extensión
-// (D5/PC4); el server es relay puro y no conoce plan mode. Devuelve true si quedó build.
+// ensureBuildMode: plan/build ya no es programático (fb-022: solo el usuario,
+// desde el popup de la extensión). Verifica el estado del perfil con un probe
+// write-class (vlp_eval sobre el primer tab): en Plan mode devuelve false y los
+// pasos write reportan la desviación con el error "blocked in Plan mode".
 func ensureBuildMode(port int) bool {
-	for i := 0; i < 2; i++ {
-		text, ok := mcpCall(port, "vlp_togglePlanMode", map[string]any{"profileId": devToken})
-		if ok && contains(text, `"planMode":false`) {
-			return true
-		}
+	tabsText, ok := mcpCall(port, "vlp_listTabs", map[string]any{})
+	if !ok {
+		return false
 	}
-	return false
+	var tabs []map[string]any
+	if err := json.Unmarshal([]byte(tabsText), &tabs); err != nil || len(tabs) == 0 {
+		return false
+	}
+	_, ok = mcpCall(port, "vlp_eval", map[string]any{"tabId": tabs[0]["tabId"], "code": "1"})
+	return ok
 }
 
 // extractInt: extrae el primer entero del texto (id devuelto por create/import, etc.).
@@ -2329,21 +2332,11 @@ func main() {
 		fmt.Println("  [NOTE] PC3 desviación documentada (MV3 no-determinista): no bloquea.")
 	}
 
-	// ---- PC4: toggle plan/build via vlp_togglePlanMode ----
-	// MEJOR ESFUERZO: depende del round-trip real (extensión conectada). El
-	// gate DURO del togglePlanMode ya está cubierto por los 3 tests Go verdes
-	// (mcp_tools_test.go). Acá solo se re-verifica end-to-end si PC2 conectó.
-	fmt.Println("\n[PC4] toggle plan/build sin UI")
-	if connected {
-		text, ok := mcpCall(serverPort, "vlp_togglePlanMode", map[string]any{"profileId": devToken})
-		firstPlan := contains(text, `"planMode":false`)
-		paso("togglePlanMode → planMode:false (plan mode)", ok && firstPlan, "")
-		text, ok = mcpCall(serverPort, "vlp_togglePlanMode", map[string]any{"profileId": devToken})
-		secondPlan := contains(text, `"planMode":true`)
-		paso("toggle doble → planMode:true (build)", ok && secondPlan, "")
-	} else {
-		fmt.Println("  [NOTE] PC4 desviación (MV3 no conectó): gate duro cubierto por tests Go (3 verdes).")
-	}
+	// ---- PC4: plan/build es user-only (fb-022) ----
+	// La tool vlp_togglePlanMode ya no existe: el estado plan/build se cambia
+	// desde el popup de la extensión. Si el perfil está en Plan, los pasos write
+	// de abajo reportan la desviación con el error "blocked in Plan mode".
+	fmt.Println("\n[PC4] plan/build es user-only (popup de la extensión) — el perfil debe estar en Build para las tools write")
 
 	// ---- PC9-PC10 (fb-013-003) + PC1-PC7 (fb-015-001): E2E best-effort de las 12 tools odoo_* (fb-019-002) ----
 	// Self-checks contra el Odoo local. Requieren el round-trip real de la extensión

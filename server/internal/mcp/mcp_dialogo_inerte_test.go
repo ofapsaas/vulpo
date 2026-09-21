@@ -40,8 +40,8 @@ func TestAct_InputSchemaHasForce(t *testing.T) {
 	for _, tl := range s.ListTools() {
 		names[tl.Name] = true
 	}
-	if len(names) != 34 {
-		t.Fatalf("el conteo de tools debe seguir en 34 (§2.7: no se agrega ninguna tool); got %d", len(names))
+	if len(names) != 33 {
+		t.Fatalf("el conteo de tools debe seguir en 33 (fb-022: 21 vlp_* + 12 odoo; §2.7: no se agrega ninguna tool); got %d", len(names))
 	}
 
 	_, schema := actTool(t, s)

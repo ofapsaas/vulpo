@@ -5,7 +5,7 @@
 // x-vlp-token y serializa.
 //
 // Wire-equivalente: métodos, códigos de error y mensajes idénticos al Node.
-// Única diferencia deliberada: serverInfo.version = '0.5.0' (Go v3.1; el
+// Única diferencia deliberada: serverInfo.version = '0.5.2' (Go v3.1; el
 // legacy Node queda 0.0.0 con drift documentado → cutover 009).
 package mcp
 
@@ -169,7 +169,7 @@ func (s *Server) initializeResult() map[string]any {
 	result := map[string]any{
 		"protocolVersion": MCPProtocolVersion,
 		"capabilities":    map[string]any{"tools": map[string]any{}},
-		"serverInfo":      map[string]any{"name": "vulpo", "version": "0.5.0"},
+		"serverInfo":      map[string]any{"name": "vulpo", "version": "0.5.2"},
 	}
 	s.mu.RLock()
 	rev := s.agentKitRevision
