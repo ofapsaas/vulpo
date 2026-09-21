@@ -23,7 +23,7 @@ The frame driver replaces dump-and-guess with CSS selectors. The cycle is:
    `ref`: **`act {ref, action, value?}`** with `action` = click/type/focus/select.
    **The text parameter of `type`/`select` is `value`** (a string, required
    for those two actions; `value: ""` is the way to clear a field). *Server
-   from Vulpo v0.4.32:* **unknown parameters are rejected** — e.g. `text` instead of
+   from Vulpo 0.5.0:* **unknown parameters are rejected** — e.g. `text` instead of
    `value` returns a tool error naming the unknown argument and listing the
    accepted ones, and nothing is dispatched (before, the field was silently
    emptied with `ok:true`). The same applies to `fill`.
@@ -32,7 +32,7 @@ The frame driver replaces dump-and-guess with CSS selectors. The cycle is:
    §3) | `{ok:false, disabled:true, error}` (disabled control, §3b) |
    `{ok:false, error}`. **`ok:true` does not mean the action had an effect**:
    verify it by re-reading (see §3b).
-   - **Validation state** *(extension ≥ v0.4.32)*: an element marked invalid
+   - **Validation state** *(extension ≥ 0.5.0)*: an element marked invalid
      by the page (`aria-invalid` other than `"false"`, or `:user-invalid`)
      carries `invalid: true`, and the frame carries a top-level
      `invalidCount: N` with the total across all pages and filters. Both are
@@ -172,7 +172,7 @@ user.
   box to filter down to a single record, navigate by direct URL if the app
   allows it, or — if available — use the system's API/RPC instead of the DOM.
 - ✅ **Behind a modal, the background comes marked `inert: true` and `act`
-  rejects it** (fb-018-004). *Requires extension ≥ v0.4.4.* Before that version
+  rejects it** (fb-018-004). *Requires extension ≥ 0.5.0.* Before that version
   the background was reported as actionable **and it was**: `act`'s synthetic
   click dispatches without hit-testing, so it bypassed the modal overlay — a
   human could not make that click, an agent could. See §3.
@@ -261,7 +261,7 @@ not be read as `null` —, and another time the whole table collapsed into **a
 single element** whose `name` was the concatenated text of all rows. It
 stabilizes after a few seconds.
 
-**Use `getFrame` with `settle: true`** (extension ≥ v0.4.20, see §5b): it waits
+**Use `getFrame` with `settle: true`** (extension ≥ 0.5.0, see §5b): it waits
 for the content to quiet down and tells you whether it managed to
 (`invalidation.settled`). Even so, right after a full navigation you can get
 `settled: true` with **zero elements** (the new document has not mounted yet):
@@ -273,7 +273,7 @@ single read taken right after navigating.
 
 If the app opens a modal dialog, **resolve it before any other action**.
 
-**With extension ≥ v0.4.4 the contract tells you and also protects you:**
+**With extension ≥ 0.5.0 the contract tells you and also protects you:**
 
 1. When a modal dialog is active, the frame carries a top-level field
    `dialog: {ref, role, name}`. The `name` is usable even if the dialog has no
@@ -303,7 +303,7 @@ the dialog's subtree).
 **With stacked dialogs** (one opens another), `dialog` always points to the top
 one; the one below and its content come out `inert: true`.
 
-**Popups opened from the dialog** *(extension ≥ v0.4.32)*. A dropdown, select
+**Popups opened from the dialog** *(extension ≥ 0.5.0)*. A dropdown, select
 menu or listbox opened from a control inside the active dialog is often
 rendered **outside** the dialog's subtree (an overlay container). Its options
 are **not** `inert` and `act click` works on them **without `force`**, as long
@@ -315,7 +315,7 @@ option still comes out `inert`, re-read after opening the dropdown before
 reaching for `force`.
 
 **`dialog.modal` — only when the dialog really covers** *(requires extension
-≥ v0.4.5)*. An element having `role="dialog"` does **not** mean it blocks the
+≥ 0.5.0)*. An element having `role="dialog"` does **not** mean it blocks the
 page: many sites use that role for popovers, pickers and side panels. That is
 why the contract distinguishes two things:
 
@@ -329,18 +329,18 @@ The decision is not made by role but by behavior: the extension checks with real
 hit-testing whether the background is still reachable. If there is no way to
 know (no layout), it assumes it covers — protects by default.
 
-> **On extension < v0.4.5** this did not exist and `role="dialog"` was always
+> **On extension < 0.5.0** this did not exist and `role="dialog"` was always
 > treated as modal, so a popover marked the whole page as `inert` and `act`
 > rejected legitimate actions. If you are against an old version and see that,
 > `force: true` is the way out.
 
-> **Extension < v0.4.4** (historical workaround, no longer needed): look for an
+> **Extension < 0.5.0** (historical workaround, no longer needed): look for an
 > element with `role: dialog` — it may have an empty `name` — take **its `ref` as
 > a prefix** and keep only the elements whose ref starts the same way. Everything
 > else is background, even if it says `visible: true`. There the background
 > **was** actionable, so discipline was the only protection.
 
-### Native browser prompts (`confirm`/`alert`/`prompt`, extension ≥ v0.4.31)
+### Native browser prompts (`confirm`/`alert`/`prompt`, extension ≥ 0.5.0)
 
 This is different from a page dialog (§3 above): a **native prompt** is a call
 to the browser's own `window.confirm`/`window.alert`/`window.prompt`, not a DOM
@@ -373,9 +373,9 @@ they can coexist.
 - **A prompt that opens after the call has already returned is not detected**:
   if nobody answers it, a later action in that tab can hang anyway.
 
-*Requires extension ≥ v0.4.31.*
+*Requires extension ≥ 0.5.0.*
 
-## 3b. What `act`'s `ok` guarantees (extension ≥ v0.4.27)
+## 3b. What `act`'s `ok` guarantees (extension ≥ 0.5.0)
 
 - **`act` dispatches the event directly to the element** (`el.click()` and
   equivalents), without hit-testing. That is why **an overlay on top does not
@@ -384,7 +384,7 @@ they can coexist.
   that a human could have clicked there, nor that the action produced the
   business result you wanted.
 - **`type` with `ok:true` also carries an observation of the written field**
-  (extension ≥ v0.4.30): after dispatching, it waits for the field to stabilize
+  (extension ≥ 0.5.0): after dispatching, it waits for the field to stabilize
   and adds `value` (the field's text at that moment), `settled` (boolean) and
   `waitedMs`. `settled` is a **temporal, not semantic** verdict: it does not
   assert that the site finished processing, nor does it cover values derived
@@ -400,7 +400,7 @@ they can coexist.
   message text, change state — and only then retry. **`force` does not bypass
   it**. Applies to `click`, `type`, `focus` and `select`. Measured example:
   "Registrar" in the chatter with an empty composer.
-- **`nativeDialog` (extension ≥ v0.4.31, see the subsection above).** A `click`
+- **`nativeDialog` (extension ≥ 0.5.0, see the subsection above).** A `click`
   that opens a native prompt comes back with `{ok:true, nativeDialog}`. With a
   native prompt already pending in the tab, any `act` comes back with
   `{ok:false, nativeDialog, error}` and any `fill` with `{success:false,
@@ -503,7 +503,7 @@ If the text matches nothing existing, many apps offer an option like
 looking for does not exist yet** — it is not a frame-driver error. Decide
 explicitly: create the new record, or refine the search.
 
-## 5b. Readiness signal `settled` (fb-018-006, v0.4.20) — and its honest limits
+## 5b. Readiness signal `settled` (fb-018-006, 0.5.0) — and its honest limits
 
 `getFrame` accepts the opt-in mode `settle: true` (with `waitMs`=5000 and
 `quietMs`=300 defaults): instead of returning instant *t*, it observes the DOM
@@ -530,7 +530,7 @@ visible. It does **NOT promise** that your last action is already reflected.
    **0 elements** can arrive. It is the (a)/(b) ambiguity of the table:
    **re-query** — the second read brings the real view (verified in the field).
    The extension already waits for the navigation commit before observing
-   (v0.4.20), and during navigation responses carry
+   (0.5.0), and during navigation responses carry
    `invalidation: {navigating: true}` — if you see it, the map belongs to the
    document that is leaving, do not plan on it.
 2. **Silent interlude** (network-phase transition): the DOM stays quiet while

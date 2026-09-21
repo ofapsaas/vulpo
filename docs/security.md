@@ -14,8 +14,7 @@ before sharing access.
 - **Only one browser per token.** A second extension connecting with the same
   token displaces the first.
 - The server authenticates each request by its token; the label in the tokens
-  file only selects which agent receives the extension's chat-panel prompts. It
-  grants no permissions.
+  file is purely informational. It grants no permissions.
 
 ## No server-side scopes
 

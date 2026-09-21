@@ -168,14 +168,14 @@ work around it through the interface: report the error.
 
 **Before writing through the UI, read the user's separator convention.**
 
-**First, `get_version` (extension ≥ v0.4.28).** Besides what it already returned,
+**First, `get_version` (extension ≥ 0.5.0).** Besides what it already returned,
 it brings `lang`, `decimal_point` and `thousands_sep` of the session's user — no
 other call needed. These three keys are optional: if the session is not valid or
 reading the language on the server fails, `get_version` still responds but
 without those keys (never `null`). In that case, fall back to the three-call
-recipe below. The convention keys exist since v0.4.28, but this skill's full
+recipe below. The convention keys exist since 0.5.0, but this skill's full
 recipe — which also relies on the observation from `act type`/`fill`
-(`web-navigation` §3b) — requires extension **≥ v0.4.30**.
+(`web-navigation` §3b) — requires extension **≥ 0.5.0**.
 
 **If `get_version` does not bring the three keys,** three-call recipe, **once per
 session** (no need to repeat it for each field):

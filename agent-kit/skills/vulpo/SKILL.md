@@ -189,7 +189,7 @@ call per interaction — see the **`web-navigation`** skill §1b for the loop an
 an example, and the **`odoo-web`** skill for narrowing large forms. `frame`
 does not exist on `vlp_click`/`vlp_fill` (see the note below).
 
-**Modal dialogs (fb-018-004 + fb-018-007, requires extension ≥ v0.4.5).**
+**Modal dialogs (fb-018-004 + fb-018-007, requires extension ≥ 0.5.0).**
 When a dialog is active, `getFrame` adds a top-level field
 `dialog: {ref, role, name, modal?}`. **`modal: true` appears only if the dialog
 actually covers the background**, checked by real hit-testing and not by role —
@@ -212,8 +212,8 @@ fb-020-001):**
 | ref does not resolve | `{ok:false, stale:true}` |
 | element covered by an active modal dialog | `{ok:false, inert:true, error}` |
 | disabled control (HTML `:disabled`, including inside `<fieldset disabled>`) | `{ok:false, disabled:true, error}` — nothing was dispatched; `force` does not bypass it |
-| `click` that opens a native browser prompt (`confirm`/`alert`/`prompt`), detected while it is open (extension ≥ v0.4.31) | `{ok:true, nativeDialog}` |
-| native prompt already pending in the tab when the call arrives, for any `action` (extension ≥ v0.4.31) | `{ok:false, nativeDialog, error}` — nothing was dispatched; takes precedence over `stale`/`inert`/`disabled`; `force` does not bypass it |
+| `click` that opens a native browser prompt (`confirm`/`alert`/`prompt`), detected while it is open (extension ≥ 0.5.0) | `{ok:true, nativeDialog}` |
+| native prompt already pending in the tab when the call arrives, for any `action` (extension ≥ 0.5.0) | `{ok:false, nativeDialog, error}` — nothing was dispatched; takes precedence over `stale`/`inert`/`disabled`; `force` does not bypass it |
 | any other failure | `{ok:false, error}` |
 
 `detached`/`settled`/`value`/`waitedMs` only appear with `ok:true` and only for
@@ -235,7 +235,7 @@ document-wide temporal verdict. See **`web-navigation`** §1b for the loop this
 enables and the timeout budget to respect (worst case the action's own wait
 plus twice `frame.waitMs`).
 
-`vlp_fill` with a native prompt pending in the tab (extension ≥ v0.4.31)
+`vlp_fill` with a native prompt pending in the tab (extension 0.5.0+)
 responds `{success:false, nativeDialog, error, selector}`, without writing or
 firing events.
 
