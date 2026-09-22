@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Vulpo — Configuración</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #1a1a2e; --card: #16213e; --primary: #7c3aed;
+      --text: #e2e8f0; --muted: #94a3b8; --danger: #ef4444; --green: #4CAF50;
+    }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 700px; margin: 0 auto; padding: 24px 16px;
+    }
+    h1 { font-size: 22px; margin-bottom: 8px; }
+    h1 span { color: var(--primary); }
+    .subtitle { color: var(--muted); margin-bottom: 24px; font-size: 14px; }
+
+    .section {
+      background: var(--card); border-radius: 12px;
+      padding: 20px; margin-bottom: 16px;
+    }
+    .section h2 { font-size: 15px; margin-bottom: 12px; color: var(--primary); }
+
+    label { display: block; margin-bottom: 8px; font-size: 13px; color: var(--muted); }
+
+    textarea {
+      width: 100%; min-height: 200px; padding: 12px;
+      background: var(--bg); color: var(--text); border: 1px solid #333;
+      border-radius: 8px; font-family: 'JetBrains Mono', 'Consolas', monospace;
+      font-size: 13px; line-height: 1.6; resize: vertical;
+    }
+    textarea:focus { outline: none; border-color: var(--primary); }
+
+    .example {
+      margin-top: 12px; padding: 12px;
+      background: var(--bg); border-radius: 8px;
+      font-family: 'JetBrains Mono', monospace; font-size: 11px; line-height: 1.6;
+      color: var(--muted); white-space: pre;
+    }
+    .example strong { color: var(--green); }
+
+    .actions {
+      display: flex; gap: 12px; margin-top: 16px;
+    }
+    .btn {
+      padding: 10px 20px; border-radius: 8px; border: none;
+      cursor: pointer; font-size: 14px; font-weight: 500;
+    }
+    .btn.primary { background: var(--primary); color: white; }
+    .btn.secondary { background: transparent; color: var(--muted); border: 1px solid #333; }
+    .btn.danger { background: var(--danger); color: white; }
+
+    .status { margin-top: 12px; padding: 10px; border-radius: 8px; font-size: 13px; display: none; }
+    .status.success { background: rgba(76,175,80,0.15); color: var(--green); display: block; }
+    .status.error { background: rgba(239,68,68,0.15); color: var(--danger); display: block; }
+
+    .valid { border-left: 3px solid var(--green); padding-left: 12px; color: var(--green); }
+    .invalid { border-left: 3px solid var(--danger); padding-left: 12px; color: var(--danger); }
+
+    footer { margin-top: 24px; text-align: center; font-size: 11px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <h1>🦊 Vulpo <span>v0.4.0</span></h1>
+  <p class="subtitle">Configurá qué agentes AI pueden acceder a cada sitio web.</p>
+
+  <div class="section">
+    <h2>Perfiles de conexión</h2>
+    <label>Un perfil por línea. Formato: <code>bridgeUrl token dominio1 dominio2 ...</code></label>
+    <textarea id="rulesInput" placeholder="https://bridge.example.com YOUR_TOKEN_HERE *.example.com
+
+https://bridge.example.com ANOTHER_TOKEN *.other-example.com"></textarea>
+    <div class="actions">
+      <button id="saveBtn" class="btn primary">💾 Guardar y reconectar</button>
+      <button id="resetBtn" class="btn secondary">↺ Restaurar</button>
+    </div>
+    <div id="statusMsg" class="status"></div>
+
+    <div class="example">
+<strong># Formato: bridgeUrl token dominio1 dominio2 ...</strong>
+<strong># Cada línea = un perfil. El orden define prioridad (first match wins).</strong>
+<strong># Líneas que empiezan con # son comentarios.</strong>
+
+https://bridge.example.com YOUR_TOKEN_HERE *.example.com
+https://bridge.example.com ANOTHER_TOKEN *.other-example.com
+
+<strong># Se puede usar "*" como dominio catch-all:</strong>
+https://your-bridge.example.com YOUR_TOKEN *
+https://another-bridge.example.com ANOTHER_TOKEN *.example.org
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>¿Cómo funciona?</h2>
+    <p style="font-size:13px;color:var(--muted);line-height:1.6">
+      Cuando abrís un tab en un dominio que matchea un perfil, Vulpo conecta
+      con el bridge server de ese perfil. El agente puede ver y controlar ese tab
+      (y solo los dominios de ese perfil). Si ningún perfil matchea, el tab está protegido.
+    </p>
+  </div>
+
+  <footer>
+    Vulpo v0.4.0 · Sin dependencias locales · Conexión WSS cifrada
+  </footer>
+
+  <script src="options.js"></script>
+</body>
+</html>

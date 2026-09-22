@@ -1,0 +1,57 @@
+{
+  "manifest_version": 3,
+  "name": "Vulpo MCP — Browser Bridge",
+  "version": "0.5.2",
+  "description": "Let AI agents operate your real Firefox — pages, forms, clicks and Odoo — through MCP. Companion server required.",
+  "author": "Pablo Manuel Rizzo",
+
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "vulpo@pablorizzo.com",
+      "data_collection_permissions": {
+        "required": ["websiteContent", "websiteActivity"]
+      }
+    }
+  },
+
+  "permissions": [
+    "tabs",
+    "activeTab",
+    "scripting",
+    "cookies",
+    "storage",
+    "alarms"
+  ],
+
+  "host_permissions": [
+    "<all_urls>"
+  ],
+
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' ws: wss:"
+  },
+
+  "background": {
+    "scripts": ["session-probe-bundle.js", "nav-guard-bundle.js", "odoo-nav-guard-bundle.js", "frame-fold-bundle.js", "native-dialog-main.js", "background.js"]
+  },
+
+  "options_ui": {
+    "page": "options.html"
+  },
+
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Vulpo MCP",
+    "default_icon": {
+      "16": "icons/icon-16.svg",
+      "48": "icons/icon-48.svg",
+      "128": "icons/icon-128.svg"
+    }
+  },
+
+  "icons": {
+    "16": "icons/icon-16.svg",
+    "48": "icons/icon-48.svg",
+    "128": "icons/icon-128.svg"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "vulpo-odoo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Odoo session probe (fb-019-001) \u2014 sonda de sesi\u00f3n, clasificaci\u00f3n de respuestas y agregaci\u00f3n de detecci\u00f3n; tests junto al c\u00f3digo (convenci\u00f3n fb-018-002).",
+  "scripts": {
+    "test": "node --test *.test.js"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

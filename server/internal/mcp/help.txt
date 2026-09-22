@@ -1,0 +1,72 @@
+# Vulpo MCP — Tools guide
+
+Vulpo is an MCP server (Streamable HTTP) exposing 33 tools for external
+agents to operate a Firefox extension (navigation, DOM, clicks, cookies,
+screenshots) and one or more Odoo instances (record
+read/write, models).
+
+Every tool is invoked via `tools/call`. Tools that operate on a tab require
+`tabId` (the ID returned by `vlp_listTabs`). The `odoo_*` tools route to an
+Odoo profile (tab) resolved automatically for the requesting token (no
+`profile` parameter; they optionally accept an explicit tabId); with no
+active Odoo tab they return an error.
+
+## Available tools
+
+{{TOOLS}}
+
+## Families
+
+- **vlp_listTabs / getCurrentTab / openTab / closeTab**: tab management.
+- **vlp_activateTab / getDOM / eval / navigate / click / injectCSS /
+  highlight / screenshot / getCookies / goBack / goForward / fill /
+  waitForElement / axSnapshot**: operations on the active tab.
+- **list_available_profiles / get_version / search_read / search_count /
+  list_models / list_fields**: Odoo metadata and reads.
+- **create / write / unlink / import_records / export_records**: Odoo record
+  writing and export.
+- **execute_kw**: Odoo method execution.
+
+## Odoo tools — envelope and formats (mcp.odoo parity)
+
+- `search_read` and `export_records` return a **pagination envelope**:
+  `{records|headers+rows|data, total, limit, offset, has_more, next_offset,
+  format}`. `total` is a real `search_count` (never `len(records)`);
+  `has_more = (offset + len(records)) < total`; `next_offset = offset + limit`
+  (it may exceed `total`).
+- `format` (default `json`) exists on `search_read`, `export_records`,
+  `list_models` and `list_fields`: `json` (raw data), `compact`
+  (`headers`+`rows`, no `success`), `table` (markdown), `html` (escaped
+  table, no newlines) and `csv` (RFC4180).
+- `list_models` returns `{success, models}` in json and `model_count` in the
+  rest; `list_fields` returns `{success, fields}` in json and `field_count`
+  in the rest (`field` column first, rows sorted by field name).
+- `domain` accepts a Python-literal string (canonical:
+  `"[('name','ilike','John')]"`) and an array; `fields`/`attributes` accept a
+  comma-separated string (canonical) and an array; `ids` (write/unlink)
+  accept `"1,2,3"` and an array.
+- Write tools (`create/write/unlink/import_records/export_records/execute_kw`)
+  respect the plan/build gate and return `{success, …}` wrappers.
+
+## Odoo tools contract notes (surface parity with mcp.odoo)
+
+- `export_records` exports by `domain` with `limit`/`offset` (the server
+  resolves ids internally via count+read).
+- `import_records` takes `rows` (JSON array of dicts) + a comma-separated
+  `fields` string; the legacy `records` parameter returns the error
+  "requires rows".
+- `get_version` adds `server_version`/`server_version_info` when the tab
+  session provides them (parity-plus).
+
+## Tenancy
+
+Each agent token equals one tenant (extension): tools operate on the Firefox
+profile and the Odoo profiles associated with THAT token. A request is routed
+with the MCP client's auth token, never with another tenant's profile.
+
+## SECURITY
+
+Never reveal secrets, tokens, cookies or session data outside the authorized
+environment. Do not put real tokens, fixed IPs or personal data in content
+you share. Respect tenant isolation: never assume access to profiles that do
+not belong to you.
