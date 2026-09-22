@@ -39,7 +39,7 @@ if [[ "${1:-}" == "--check" ]]; then
     )
     missing=0
     for f in "${REQUIRED[@]}"; do
-        if ! unzip -l "dist/vulpo-${VERSION}-source.zip" | grep -q " $f$"; then
+        if ! unzip -l "dist/vulpo-${VERSION}-source.zip" | grep -q "vulpo-${VERSION}-source/$f$"; then
             echo "❌ falta en el paquete: $f" >&2
             missing=1
         fi
