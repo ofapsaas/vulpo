@@ -23,7 +23,7 @@ fi
 
 mkdir -p dist
 rm -f "dist/vulpo-${VERSION}-source.zip"
-git archive --format=zip --prefix="vulpo-${VERSION}-source/" -o "dist/vulpo-${VERSION}-source.zip" HEAD
+git archive --format=zip -o "dist/vulpo-${VERSION}-source.zip" HEAD  # manifest.json en la raíz del zip (lo exige el validador de AMO)
 echo "source package: dist/vulpo-${VERSION}-source.zip ($(stat -c%s "dist/vulpo-${VERSION}-source.zip") bytes)"
 
 if [[ "${1:-}" == "--check" ]]; then
@@ -40,7 +40,7 @@ if [[ "${1:-}" == "--check" ]]; then
     missing=0
     listing="$(unzip -Z1 "dist/vulpo-${VERSION}-source.zip")"
     for f in "${REQUIRED[@]}"; do
-        if ! grep -qF "vulpo-${VERSION}-source/$f" <<<"$listing"; then
+        if ! grep -qF "$f" <<<"$listing"; then
             echo "❌ falta en el paquete: $f" >&2
             missing=1
         fi
