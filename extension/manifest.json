@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "Vulpo — Browser Bridge",
+  "name": "Vulpo MCP — Browser Bridge",
   "version": "0.5.2",
-  "description": "Conecta Firefox con agentes AI via WebSocket. Navegación de browser para agentes: tabs, DOM, acciones y Odoo.",
-  "author": "Vulpo",
+  "description": "Let AI agents operate your real Firefox — pages, forms, clicks and Odoo — through MCP. Companion server required.",
+  "author": "Pablo Manuel Rizzo",
 
   "browser_specific_settings": {
     "gecko": {
-      "id": "vulpo@example.com",
+      "id": "vulpo@pablorizzo.com",
       "data_collection_permissions": {
         "required": ["websiteContent", "websiteActivity"]
       }
@@ -41,7 +41,7 @@
 
   "action": {
     "default_popup": "popup/popup.html",
-    "default_title": "Vulpo",
+    "default_title": "Vulpo MCP",
     "default_icon": {
       "16": "icons/icon-16.svg",
       "48": "icons/icon-48.svg",
