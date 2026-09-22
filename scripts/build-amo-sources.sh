@@ -38,14 +38,15 @@ if [[ "${1:-}" == "--check" ]]; then
         "scripts/build-xpi.sh"
     )
     missing=0
+    listing="$(unzip -Z1 "dist/vulpo-${VERSION}-source.zip")"
     for f in "${REQUIRED[@]}"; do
-        if ! unzip -Z1 "dist/vulpo-${VERSION}-source.zip" | grep -qF "vulpo-${VERSION}-source/$f"; then
+        if ! grep -qF "vulpo-${VERSION}-source/$f" <<<"$listing"; then
             echo "❌ falta en el paquete: $f" >&2
             missing=1
         fi
     done
     # nada de node_modules / artefactos
-    if unzip -Z1 "dist/vulpo-${VERSION}-source.zip" | grep -qE 'node_modules/|/dist/|\.amo-upload-uuid'; then
+    if grep -qE 'node_modules/|/dist/|amo-upload-uuid' <<<"$listing"; then
         echo "❌ el paquete incluye node_modules/artefactos" >&2
         missing=1
     fi
