@@ -416,18 +416,47 @@ they can coexist.
   - **Disabled only by class** (`.o_disabled`, `.btn.disabled`,
     `.o_switch_disabled`): **neither the map nor `act` detect it**. The map says
     `disabled:false` and `act` responds `ok:true` even though the click does
-    nothing. If a control looks greyed out or the action has no effect, take a
-    `vlp_screenshot` and verify by re-reading.
+    nothing. If a control looks greyed out or the action has no effect, do not
+    capture the screen yourself — delegate the look (the image-boundary rule
+    below) and afterwards verify by re-reading the frame.
 - **Odoo's notifications toast does not appear in the frame**, and
   `getFrame settle:true` waits for it to disappear (~4.75 s measured: its
   progress bar mutates the DOM non-stop). If a read with `settle` takes long, it
   may be that.
-- **When HTML is not enough, look.** If it is unclear what is really rendered —
-  something seems to cover the control, the effect does not show up in the map,
-  the view does not look like what the frame describes — take a
-  `vlp_screenshot`. The primary tools (`vlp_screenshot`,
-  `vlp_click`, …) remain legitimate: the frame is the efficient path, not
-  the only one.
+- **When HTML is not enough, look — but delegate the looking.** If it is
+  unclear what is really rendered — something seems to cover the control, the
+  effect does not show up in the map, the view does not look like what the
+  frame describes — seeing the screen is still the right move, and the frame
+  comes first: exhaust `read[]`/`value`/`checked`, re-reads and `settle`
+  before any image. What changes with vision is never the tool inventory —
+  only WHO looks. The main agent never captures or reads images: seeing the
+  screen is a sub-agent's job.
+
+  **Delegation recipe for the main agent:** hand the sub-agent **one concrete
+  question** (not "check the screen": e.g. "is the Confirm button enabled?").
+  The sub-agent captures its own `vlp_screenshot` in its own workspace and
+  returns a single line of conclusion ("state: draft; Confirm button
+  enabled"). The main agent receives one line, never the image — the image
+  lives and dies inside the sub-agent's context, so the main agent's history
+  stays free of megabytes of base64. The sub-agent may use the same model
+  you run on: the rule does not restrict which model looks, it restricts
+  which context the image lands in. (A vision-capable main agent is exactly
+  why this rule has to be spelled out: without it, seeing is cheap and the
+  history fills up with captures counted as text.)
+
+  **When the sub-agent is not enough:** verify by re-reading the frame after
+  its one-line answer. This boundary also covers reading an image file from
+  disk with the runtime's read tool — an image file never enters the main
+  agent's context, whatever its source. The frame is the efficient path, not
+  the only one: the difference is who pays for the pixels.
+- **Attempt cap: 3 attempts on the same control with the same objective, no
+  more.** This applies to every GUI-interaction loop — clicks, retries,
+  alternate selectors, vision-mediated checks — not only to captures. At the
+  third failed attempt, stop trying and register the defect: which control,
+  what you tried, what you observed. Then take another path — the site's ORM
+  or typed API if the task allows it; otherwise report the blockage and stop.
+  Eight broken attempts do not prove perseverance, they prove the method was
+  not changed in time.
 
 ## 4. Verifying a view's real state
 
@@ -450,7 +479,8 @@ a value — an empty field is declared with `value: ""` (present).
 - **Values of fields being edited are visible before saving.** The `value` of an
   `<input>`/`<textarea>`/`<select>` reflects what is typed at that moment,
   **without needing to save first**. This closes the gap that forced using
-  screenshot+vision or waiting until after saving.
+  screenshot+vision (via a sub-agent — see the image-boundary rule in §3b)
+  or waiting until after saving.
 - **Security exception, hard and without workarounds:**
   `input[type=password|file|hidden]` **never** expose `value` — neither the value
   nor its length. An agent must not interpret the absence of `value` on those
@@ -467,7 +497,9 @@ Sources of truth, in order of preference:
 3. **`read[]`** is still useful for confirmation/chatter messages ("creado",
    "guardado") and for the content of elements the frame cannot reference yet
    (see §2b — list rows).
-4. **Screenshot + vision**, if you have the tool available, for what the
+4. **Screenshot + vision — but only through a sub-agent** (see the
+   image-boundary rule in §3b: the main agent never captures or reads
+   images; it delegates the looking and gets one line back), for what the
    contract does not cover yet (see limitations below).
    (`eval` is still not an escape hatch: sites with a strict CSP — Odoo among
    them — block it.)

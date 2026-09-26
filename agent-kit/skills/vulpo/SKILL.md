@@ -84,6 +84,12 @@ authoritative list). They are grouped as follows:
   Plan/build se cambia desde el popup de la extensión Vulpo (user-only; los agentes no pueden togglearlo).
 - **Frame driver (fb-017):** `vlp_getFrame` (read) — serializes the tab's accessible DOM into the paginated `Frame` contract (sections/read/do, stable refs) and includes `invalidation: {changedSinceLast}`; `vlp_act` (write, gated by plan/build) — runs click/type/focus/select on a `ref` from the map.
 
+- **Images never in the main agent's context.** The main agent never
+  captures or reads images — not with `vlp_screenshot`, not by reading an
+  image file from disk. When seeing the screen is needed, delegate the look
+  to a sub-agent with one concrete question and act on the single line it
+  returns. Full rule and rationale: see vulpo-web-navigation (§3b).
+
 > **Prefer `act`+`ref` over `vlp_click`/`vlp_fill`.** The latter two
 > are legacy CSS-selector tools, superseded by the frame driver's stable
 > `ref`s, and they do **not** support the `frame` fold (fb-020-008) — they
