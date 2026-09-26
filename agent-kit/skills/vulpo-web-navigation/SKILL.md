@@ -1,6 +1,6 @@
 ---
 name: vulpo-web-navigation
-description: Generic pattern for navigating and interacting with modern SPAs/webapps through an accessibility-tree frame driver (paginated ref map + actions by ref, like Vulpo's getFrame/act). Covers the read→decide→act→re-read loop, why refs go stale after the DOM mutates, how to resolve modal dialogs before any other action, how to verify a view's real state (never the tab title), and the generic combobox/autocomplete recipe type→re-read→click option. Not specific to any site: applies to any webapp exposing an equivalent frame driver (Odoo, Salesforce, React admin panels, etc.). Use when an agent needs to navigate/interact with a complex webapp via accessibility instead of brittle CSS selectors.
+description: Generic pattern for navigating and interacting with modern SPAs/webapps through an accessibility-tree frame driver (paginated ref map + actions by ref, like Vulpo's getFrame/act). Covers the read→decide→act→re-read loop, why refs go stale after the DOM mutates, how to resolve modal dialogs before any other action, how to verify a view's real state (never the tab title), and the generic combobox/autocomplete recipe type→re-read→click option. Not specific to any site: applies to any webapp exposing an equivalent frame driver (Odoo, Salesforce, React admin panels, etc.). The image boundary applies throughout: the main agent never captures or reads images (including files from disk) and delegates the looking to a sub-agent. Use when an agent needs to navigate/interact with a complex webapp via accessibility instead of brittle CSS selectors.
 ---
 
 # Generic web navigation via frame driver (accessibility)
@@ -428,8 +428,8 @@ they can coexist.
   effect does not show up in the map, the view does not look like what the
   frame describes — seeing the screen is still the right move, and the frame
   comes first: exhaust `read[]`/`value`/`checked`, re-reads and `settle`
-  before any image. What changes with vision is never the tool inventory —
-  only WHO looks. The main agent never captures or reads images: seeing the
+  before any image. The tools that are legitimate do not change — only who
+  uses them. The main agent never captures or reads images: seeing the
   screen is a sub-agent's job.
 
   **Delegation recipe for the main agent:** hand the sub-agent **one concrete
@@ -444,11 +444,11 @@ they can coexist.
   why this rule has to be spelled out: without it, seeing is cheap and the
   history fills up with captures counted as text.)
 
-  **When the sub-agent is not enough:** verify by re-reading the frame after
-  its one-line answer. This boundary also covers reading an image file from
-  disk with the runtime's read tool — an image file never enters the main
-  agent's context, whatever its source. The frame is the efficient path, not
-  the only one: the difference is who pays for the pixels.
+  **After the answer, and for images from disk:** verify by re-reading the
+  frame after its one-line answer. This boundary also covers reading an
+  image file from disk with the runtime's read tool — an image file never
+  enters the main agent's context, whatever its source. The frame is the
+  efficient path, not the only one: the difference is who pays for the pixels.
 - **Attempt cap: 3 attempts on the same control with the same objective, no
   more.** This applies to every GUI-interaction loop — clicks, retries,
   alternate selectors, vision-mediated checks — not only to captures. At the
