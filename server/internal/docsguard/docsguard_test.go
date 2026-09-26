@@ -289,61 +289,92 @@ func TestCatalogSkillImageBoundary(t *testing.T) {
 // "re-point, never widen" (spec I-2/P7) para los literales de I-2 — cada
 // entrada allowlistada sigue apuntando a la línea que contiene el MISMO
 // literal. Los literales pinneados son los verificados en I-2: la pregunta de
-// confirmación (l.249-250, frase partida en dos líneas → se validan juntas),
-// el token `el.click()` (l.380) y la nota user-only del plan/build
+// confirmación (grupo 249+250, frase partida en dos líneas → se validan
+// juntas), el token `el.click()` (l.380) y la nota user-only del plan/build
 // (vulpo/SKILL.md l.84). La entrada de vulpo-odoo-web (UI Odoo de fb-022,
-// byte-unchanged por P7) se valida solo estructuralmente aquí: sin pinear
-// literales de UI ajenos a I-2.
+// byte-unchanged por P7) se valida solo estructuralmente.
+//
+// Fuente de verdad: allowedSpanish (toolsref.go ~152-157). Los números de
+// línea de los pines lineales se leen del map en runtime (aquí NO hay
+// hardcode de líneas sueltas): un re-point del map (p.ej. nav 380) sigue el
+// test automáticamente y re-verifica el mismo fragmento en la nueva línea.
+// Excepción — ver bloque groupCheck: el grupo multi-línea nav 249+250 queda
+// hardcodeado (el map no expresa grupos) pero con aserto de sync contra el
+// map, así el drift map↔test es imposible en ambas direcciones.
 func TestAllowedSpanishLiterals(t *testing.T) {
 	root := repoRoot(t)
-	type fragCheck struct {
-		lines    []int // números de línea 1-based (grupo si la frase parte líneas)
-		fragment string
-	}
-	perFile := map[string][]fragCheck{
-		navSkillSuffix: {
-			{lines: []int{249, 250}, fragment: "¿estás seguro"},
-			{lines: []int{380}, fragment: "el.click()"},
-		},
-		catalogSkillSuffix: {
-			{lines: []int{84}, fragment: "plan/build"},
-			{lines: []int{84}, fragment: "user-only"},
-		},
-	}
 	files := scanTargets(t, root)
-	for suffix, checks := range perFile {
-		var path string
+	findTarget := func(suffix string) string {
 		for _, f := range files {
 			if strings.HasSuffix(f, suffix) {
-				path = f
-				break
+				return f
 			}
 		}
-		if path == "" {
-			t.Fatalf("%s: no aparece en scanTargets (¿cambió el layout de agent-kit/skills/*/SKILL.md?)", suffix)
+		t.Fatalf("%s: no aparece en scanTargets (¿cambió el layout de agent-kit/skills/*/SKILL.md?)", suffix)
+		return ""
+	}
+
+	// ÚNICO caso hardcodeado de líneas: el grupo multi-línea. allowedSpanish
+	// es []int y no puede expresar "estas dos líneas se validan JUNTAS", así
+	// que el grupo vive acá (ver groupCheck abajo): el groupCheck afirma que
+	// estas líneas siguen presentes en el map → un re-point de 249/250 en el
+	// map sin actualizar el grupo falla el test.
+	groupLines := map[string][]int{
+		navSkillSuffix: {249, 250}, // "¿estás seguro" partida en dos líneas
+	}
+	// linePins: fragmentos (TODOS deben estar) que verifica en CADA línea
+	// allowlistada del archivo QUE NO sea del grupo multi-línea (esas las
+	// valida groupCheck, con join). Las líneas provienen del map; si el map
+	// quita/agrega una línea suelta, este loop la cubre automáticamente.
+	linePins := map[string][]string{
+		navSkillSuffix:     {"el.click()"},
+		catalogSkillSuffix: {"plan/build", "user-only"}, // ambos sobre l.84
+	}
+
+	for suffix, frags := range linePins {
+		allowed := allowedSpanish[suffix]
+		if len(allowed) == 0 {
+			t.Fatalf("%s: sin entradas en allowedSpanish — el pin no tiene nada que verificar (¿cambió toolsref.go?)", suffix)
 		}
-		raw, err := os.ReadFile(path)
+		var group []int
+		if g, ok := groupLines[suffix]; ok {
+			group = g
+		}
+		isGroup := func(n int) bool {
+			for _, g := range group {
+				if g == n {
+					return true
+				}
+			}
+			return false
+		}
+		raw, err := os.ReadFile(findTarget(suffix))
 		if err != nil {
 			t.Fatalf("%s: %v", suffix, err)
 		}
 		lines := strings.Split(string(raw), "\n")
-		for _, c := range checks {
-			var joined string
-			for _, n := range c.lines {
-				if n < 1 || n > len(lines) {
-					t.Fatalf("%s: allowlist apunta a la línea %d inexistente (archivo de %d líneas) — el re-point perdió el literal", suffix, n, len(lines))
-				}
-				joined += " " + strings.TrimSpace(lines[n-1])
+		for _, n := range allowed {
+			if n < 1 || n > len(lines) {
+				t.Fatalf("%s: allowlist apunta a la línea %d inexistente (archivo de %d líneas) — el re-point perdió el literal", suffix, n, len(lines))
 			}
-			if !strings.Contains(normalize(joined), normalize(c.fragment)) {
-				t.Errorf("%s: línea(s) %v ya no contienen el literal I-2 %q — re-point, never widen (spec P7)", suffix, c.lines, c.fragment)
+			if isGroup(n) {
+				// Literales multi-línea: los valida groupCheck (join de las
+				// líneas del grupo); acá no aplica el fragmento suelto.
+				continue
+			}
+			joined := normalize(" " + strings.TrimSpace(lines[n-1]))
+			for _, frag := range frags {
+				if !strings.Contains(joined, normalize(frag)) {
+					t.Errorf("%s: línea %d ya no contiene el literal I-2 %q — re-point, never widen (spec P7)", suffix, n, frag)
+				}
 			}
 		}
 	}
+
 	// Resto de entradas de allowedSpanish (UI Odoo, byte-unchanged): chequeo
 	// estructural — la línea allowlistada existe y no quedó vacía.
 	for suffix, nums := range allowedSpanish {
-		if suffix == navSkillSuffix || suffix == catalogSkillSuffix {
+		if _, pinned := linePins[suffix]; pinned {
 			continue
 		}
 		var path string
@@ -368,6 +399,43 @@ func TestAllowedSpanishLiterals(t *testing.T) {
 			if strings.TrimSpace(lines[n-1]) == "" {
 				t.Errorf("%s: línea allowlistada %d quedó vacía — el re-point apuntó a una línea sin contenido", suffix, n)
 			}
+		}
+	}
+
+	// groupCheck — grupo multi-línea (nav 249+250, "¿estás seguro"): la frase
+	// parte en dos líneas y allowedSpanish NO expresa grupos ([]int, no
+	// pares), así que las líneas del grupo están hardcodeadas en groupLines
+	// arriba. Para que ese hardcode no derive del map: acá afirmamos que CADA
+	// línea del grupo sigue listeada en allowedSpanish para su archivo. Un
+	// re-point del map de 249/250 (o su remoción) sin actualizar el grupo
+	// falla ruidosamente hasta que el literal del grupo se actualice — drift
+	// imposible en ambas direcciones (map↔test); spec P7.
+	for groupSuffix, glines := range groupLines {
+		raw, err := os.ReadFile(findTarget(groupSuffix))
+		if err != nil {
+			t.Fatalf("%s: %v", groupSuffix, err)
+		}
+		gfile := strings.Split(string(raw), "\n")
+		mapHas := func(n int) bool {
+			for _, m := range allowedSpanish[groupSuffix] {
+				if m == n {
+					return true
+				}
+			}
+			return false
+		}
+		var joined string
+		for _, n := range glines {
+			if !mapHas(n) {
+				t.Errorf("%s: grupo multi-línea hardcodeado %v desincronizado con allowedSpanish %v — actualizá el grupo junto con el re-point (la frase parte en dos líneas, el map no expresa grupos)", groupSuffix, glines, allowedSpanish[groupSuffix])
+			}
+			if n < 1 || n > len(gfile) {
+				t.Fatalf("%s: grupo hardcodeado apunta a la línea %d inexistente (archivo de %d líneas) — el re-point perdió el literal de confirmación", groupSuffix, n, len(gfile))
+			}
+			joined += " " + strings.TrimSpace(gfile[n-1])
+		}
+		if !strings.Contains(normalize(joined), normalize("¿estás seguro")) {
+			t.Errorf("%s: líneas %v ya no contienen el literal I-2 de confirmación %q — re-point, never widen (spec P7)", groupSuffix, glines, "¿estás seguro")
 		}
 	}
 }
