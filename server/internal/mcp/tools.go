@@ -251,7 +251,8 @@ func RegisterAllTools(s *Server, hub Hub, helpFile string, odoo *odooregistry.Re
 	})
 
 	s.RegisterTool(Tool{
-		Name: "vlp_screenshot", Description: "Take a screenshot of a browser tab.",
+		Name:        "vlp_screenshot",
+		Description: "Take a screenshot of a browser tab. On success the result carries the capture as one image content part (base64 never duplicated in text) followed by one text part of screenshot metadata ({screenshot:{mimeType,width,height,bytes,source,rescaled}}); captures whose largest side exceeds 1280 px are rescaled to exactly 1280 (aspect preserved) and re-encoded as JPEG quality 85, while captures at or under the cap are returned byte-identical with no re-encode.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -261,7 +262,15 @@ func RegisterAllTools(s *Server, hub Hub, helpFile string, odoo *odooregistry.Re
 		},
 		Handler: func(params map[string]any, token string) (any, error) {
 			t := tabID(params)
-			return hub.Command(token, Command{Command: "screenshot", Params: map[string]any{"tabId": t}, TabID: t})
+			res, err := hub.Command(token, Command{Command: "screenshot", Params: map[string]any{"tabId": t}, TabID: t})
+			if err != nil {
+				return nil, err
+			}
+			out, err := screenshotImageParts(res)
+			if err != nil {
+				return nil, err
+			}
+			return out, nil
 		},
 	})
 

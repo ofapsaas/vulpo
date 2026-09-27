@@ -180,7 +180,7 @@ Open a new browser tab with the specified URL.
 
 ### `vlp_screenshot`
 
-Take a screenshot of a browser tab.
+Take a screenshot of a browser tab. On success the result carries the capture as one image content part (base64 never duplicated in text) followed by one text part of screenshot metadata ({screenshot:{mimeType,width,height,bytes,source,rescaled}}); captures whose largest side exceeds 1280 px are rescaled to exactly 1280 (aspect preserved) and re-encoded as JPEG quality 85, while captures at or under the cap are returned byte-identical with no re-encode.
 
 | Param | Type | Required |
 |---|---|---|

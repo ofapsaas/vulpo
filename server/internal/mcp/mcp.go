@@ -204,9 +204,19 @@ func (s *Server) callTool(id any, params map[string]any, token string) any {
 	// `>` como `\u003e` y los refs llegan ilegibles al agente. Sin escape HTML:
 	// los refs quedan literales (`header>nav>a`), el JSON del envelope sigue
 	// siendo válido (el frame ya es un string embebido, no un objeto anidado).
+	// fb-024-screenshot-imagen: imageContentResult (only vlp_screenshot) emits
+	// content[0] as a real image part + content[1] metadata text;
+	// multiContentResult keeps its primary-first convention.
 	multi, isMulti := result.(multiContentResult)
 	if isMulti {
 		result = multi.primary
+	}
+	if img, isImage := result.(imageContentResult); isImage {
+		content := []any{
+			map[string]any{"type": "image", "data": img.dataBase64, "mimeType": img.mimeType},
+			map[string]any{"type": "text", "text": img.metadata},
+		}
+		return success(id, map[string]any{"content": content})
 	}
 	text, _ := marshalNoEscape(result)
 	content := []any{map[string]any{"type": "text", "text": string(text)}}
