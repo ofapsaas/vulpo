@@ -18,8 +18,11 @@ package mcp
 
 import (
 	"bytes"
+	"compress/zlib"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
+	"hash/crc32"
 	"image"
 	"image/jpeg"
 	"image/png"
@@ -354,3 +357,197 @@ var (
 	_ = reflect.DeepEqual // keep reflect import until a strict set-check lands
 	_ = jpeg.Encode       // registered decoder check for jpeg paths
 )
+
+// ---
+// Micro-RED (review round 2, owner-approved): F-2, F-5 and F-7(a) of
+// docs/specs/fb-024-screenshot-imagen/review.md §0/§3. Additive only — the
+// tests above are the untouched acceptance surface and must keep passing
+// post-GREEN.
+//
+// Colors pinned now (RED run on the committed tree de4310e):
+//   - F-2 (TestScreenshotPassthroughFullDecode): RED — the ≤1280 passthrough
+//     validates with DecodeConfig (header) only, so a valid-header /
+//     corrupt-body PNG travels as a success capture.
+//   - F-5 (TestScreenshotMimeBytesMismatch): RED-neutral pin — the committed
+//     mime/bytes guard (screenshot_image.go:83-85) already rejects this
+//     class; the test exists so the guard cannot regress silently.
+//   - F-7(a) (TestScreenshotHugeDimensionsRejected): RED on the huge-dims
+//     case (no sanity cap today: the full decode materializes the declared
+//     pixels before any check); the 4000×3000 case is a green-neutral
+//     boundary pin (test-local threshold expectation: 8192 px max side).
+// ---
+
+// fb024TruncatedPNG cuts a valid stdlib PNG right after the start of its
+// IDAT chunk (type + 2 payload bytes): signature+IHDR stay intact so
+// DecodeConfig still reports the real width/height, but a full image.Decode
+// hits the truncated IDAT and fails — the exact F-2 wrong-behavior class
+// (valid header, corrupt body).
+func fb024TruncatedPNG(t *testing.T, raw []byte) []byte {
+	t.Helper()
+	idx := bytes.Index(raw, []byte("IDAT"))
+	if idx < 8 || idx+4+2 > len(raw) {
+		t.Fatalf("fb-024 F-2 fixture: stdlib PNG without a recognizable early IDAT chunk (len=%d, idx=%d)", len(raw), idx)
+	}
+	return raw[:idx+4+2] // signature + IHDR + IDAT length/type + 2 data bytes
+}
+
+func TestScreenshotPassthroughFullDecode(t *testing.T) {
+	raw := fb024SynthPNG(t, 64, 48)
+	trunc := fb024TruncatedPNG(t, raw)
+
+	// Fixture sanity: the header survives (DecodeConfig reads 64×48) while a
+	// full decode fails — only then does the fixture exercise the F-2 gap.
+	if w, h := decodedDims(t, trunc); w != 64 || h != 48 {
+		t.Fatalf("fb-024 F-2 fixture: DecodeConfig = %dx%d, want 64x48 (header must survive truncation)", w, h)
+	}
+	if _, _, err := image.Decode(bytes.NewReader(trunc)); err == nil {
+		t.Fatalf("fb-024 F-2 fixture: truncated PNG unexpectedly full-decodes; fixture does not exercise the decode gap")
+	}
+
+	hub := &MockHub{}
+	res, errMap := fb024CallScreenshot(t, hub, map[string]any{"dataUrl": fb024DataUrl(trunc)})
+	if errMap == nil {
+		t.Fatalf("fb-024 F-2 RED: a PNG with a valid header but a corrupt body was delivered as a SUCCESS capture (result=%v) — the ≤1280 passthrough validates with DecodeConfig only; want a readable MCP error envelope whose message starts %q and names the body/decode failure", res, "screenshot: invalid capture")
+	}
+	if codeOf(errMap) != -32000 {
+		t.Errorf("fb-024 F-2: error code = %v, want -32000", errMap["code"])
+	}
+	msg, _ := errMap["message"].(string)
+	if !strings.HasPrefix(msg, "screenshot: invalid capture") {
+		t.Errorf("fb-024 F-2: error message = %q, want prefix %q", msg, "screenshot: invalid capture")
+	}
+	if !strings.Contains(msg, "decode") {
+		t.Errorf("fb-024 F-2: error message = %q, want it to name the decode failure of the image body", msg)
+	}
+}
+
+// TestScreenshotMimeBytesMismatch pins F-5: the dataUrl prefix and the
+// decoded image format must agree; a contradictory capture is rejected with
+// the readable prefix, never delivered. RED-neutral on the committed tree
+// (the guard fires at DecodeConfig level already); it is written so the
+// guard cannot regress silently.
+func TestScreenshotMimeBytesMismatch(t *testing.T) {
+	pngBytes := fb024SynthPNG(t, 32, 24)
+	var jbuf bytes.Buffer
+	if err := jpeg.Encode(&jbuf, image.NewRGBA(image.Rect(0, 0, 32, 24)), nil); err != nil {
+		t.Fatalf("fb-024 F-5 fixture: jpeg.Encode: %v", err)
+	}
+	cases := []struct {
+		name    string
+		dataURL string
+	}{
+		{"prefix declares png, bytes are jpeg", "data:image/png;base64," + base64.StdEncoding.EncodeToString(jbuf.Bytes())},
+		{"prefix declares jpeg, bytes are png", "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(pngBytes)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hub := &MockHub{}
+			_, errMap := fb024CallScreenshot(t, hub, map[string]any{"dataUrl": tc.dataURL})
+			if errMap == nil {
+				t.Fatalf("fb-024 F-5 (%s): a capture whose declared mime contradicts its magic bytes was delivered as a SUCCESS capture; want a readable MCP error envelope whose message starts %q and names the mime/format mismatch", tc.name, "screenshot: invalid capture")
+			}
+			if codeOf(errMap) != -32000 {
+				t.Errorf("fb-024 F-5 (%s): error code = %v, want -32000", tc.name, errMap["code"])
+			}
+			msg, _ := errMap["message"].(string)
+			if !strings.HasPrefix(msg, "screenshot: invalid capture") {
+				t.Errorf("fb-024 F-5 (%s): error message = %q, want prefix %q", tc.name, msg, "screenshot: invalid capture")
+			}
+			if !strings.Contains(msg, "image/png") || !strings.Contains(msg, "image/jpeg") {
+				t.Errorf("fb-024 F-5 (%s): error message = %q, want it to name both the declared and the decoded mime", tc.name, msg)
+			}
+		})
+	}
+}
+
+// fb024CraftedGrayPNG builds a minimal valid grayscale PNG (color type 0,
+// bit depth 8, non-interlaced, filter 0) declaring w×h with a solid fill.
+// The scanlines compress to a few KB, so the fixture never materializes the
+// declared pixels in the test process — only the header declares the bomb.
+// Stdlib's encoder cannot emit a lying header, so the chunk framing
+// (length/type/CRC + zlib scanlines) is crafted here with binary/crc32/zlib.
+func fb024CraftedGrayPNG(t *testing.T, w, h int) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	buf.Write([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'})
+	chunk := func(typ string, data []byte) {
+		var hdr [4]byte
+		binary.BigEndian.PutUint32(hdr[:], uint32(len(data)))
+		buf.Write(hdr[:])
+		buf.WriteString(typ)
+		buf.Write(data)
+		var sum [4]byte
+		binary.BigEndian.PutUint32(sum[:], crc32.ChecksumIEEE(append([]byte(typ), data...)))
+		buf.Write(sum[:])
+	}
+	ihdr := make([]byte, 13)
+	binary.BigEndian.PutUint32(ihdr[0:4], uint32(w))
+	binary.BigEndian.PutUint32(ihdr[4:8], uint32(h))
+	ihdr[8] = 8 // bit depth 8
+	ihdr[9] = 0 // color type 0: grayscale — 1 byte/px keeps a full decode affordable if one ever happens
+	chunk("IHDR", ihdr)
+
+	var idat bytes.Buffer
+	zw := zlib.NewWriter(&idat)
+	row := make([]byte, 1+w) // filter byte 0 + w gray samples
+	for y := 0; y < h; y++ {
+		zw.Write(row)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("fb-024 F-7 fixture: zlib close: %v", err)
+	}
+	chunk("IDAT", idat.Bytes())
+	chunk("IEND", nil)
+	return buf.Bytes()
+}
+
+// TestScreenshotHugeDimensionsRejected pins F-7(a): after DecodeConfig, the
+// handler must sanity-cap the declared dimensions BEFORE any full decode —
+// a capture declaring enormous dims is a decompression-bomb surface and
+// must fail with the readable prefix instead of materializing. Test-local
+// threshold expectation: the cap sits far above any real capture (RED uses
+// 20000×20000, beyond any sane cap); the green case (4000×3000) pins that
+// the cap does not swallow legitimate over-1280 captures. If the GREEN
+// implementation documents a different named constant, the boundary cases
+// here (20000 reject / 4000 accept) must still both hold — i.e. the
+// constant lies in (4000, 20000) and is named in the code.
+func TestScreenshotHugeDimensionsRejected(t *testing.T) {
+	t.Run("declared 20000x20000 rejected before decode", func(t *testing.T) {
+		raw := fb024CraftedGrayPNG(t, 20000, 20000)
+		if w, h := decodedDims(t, raw); w != 20000 || h != 20000 {
+			t.Fatalf("fb-024 F-7 fixture: DecodeConfig = %dx%d, want 20000x20000", w, h)
+		}
+		hub := &MockHub{}
+		res, errMap := fb024CallScreenshot(t, hub, map[string]any{"dataUrl": fb024DataUrl(raw)})
+		if errMap == nil {
+			t.Fatalf("fb-024 F-7(a) RED: a capture declaring 20000x20000 px was delivered as a SUCCESS capture (result=%v) — no dimension sanity cap today: the full decode materializes the declared pixels; want a readable MCP error envelope whose message starts %q and names the dimension cap", res, "screenshot: invalid capture")
+		}
+		if codeOf(errMap) != -32000 {
+			t.Errorf("fb-024 F-7(a): error code = %v, want -32000", errMap["code"])
+		}
+		msg, _ := errMap["message"].(string)
+		if !strings.HasPrefix(msg, "screenshot: invalid capture") {
+			t.Errorf("fb-024 F-7(a): error message = %q, want prefix %q", msg, "screenshot: invalid capture")
+		}
+		if !strings.Contains(msg, "20000") {
+			t.Errorf("fb-024 F-7(a): error message = %q, want it to name the rejected dimensions", msg)
+		}
+	})
+
+	t.Run("4000x3000 still delivered (over 1280 cap, under sanity threshold)", func(t *testing.T) {
+		raw := fb024CraftedGrayPNG(t, 4000, 3000)
+		hub := &MockHub{}
+		res, errMap := fb024CallScreenshot(t, hub, map[string]any{"dataUrl": fb024DataUrl(raw)})
+		if errMap != nil {
+			t.Fatalf("fb-024 F-7 sanity: a 4000x3000 capture (over the 1280 rescale cap, under the 8192 test-local threshold) was rejected: %v — the sanity cap must not swallow legitimate over-1280 captures", errMap)
+		}
+		parts := fb024Content(t, res)
+		if len(parts) != 2 {
+			t.Fatalf("fb-024 F-7 sanity: content has %d parts, want 2 — %v", len(parts), parts)
+		}
+		delivered := fb024ImagePart(t, parts[0], "image/jpeg")
+		if w, h := decodedDims(t, delivered); w != 1280 || h != 960 {
+			t.Errorf("fb-024 F-7 sanity: delivered dims = %dx%d, want 1280x960 (floor of 3000*1280/4000)", w, h)
+		}
+	})
+}
