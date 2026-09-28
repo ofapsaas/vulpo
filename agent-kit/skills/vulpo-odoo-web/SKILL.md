@@ -46,12 +46,24 @@ like; `expands:false` still means "there is something to open here", not
 
 Open it and pick, in one call: `act click` on the field's `ref`, with `frame`
 folded into the same call, returns the map with the dropdown already open —
-its options arrive as `role:"menuitem"` entries, the currently-selected one
-carrying `selected:true` (measured):
+its options arrive as `role:"menuitem"` entries, and on them selected marks
+the highlighted option — the one Enter would take: usually the first option
+of the open list, and with a search filter active the first filtered match
+takes it by construction of the search. The highlight is never the field's
+current value: the current value comes from the field's own `value` key.
+The key follows `aria-selected`, which in the ARIA combobox pattern
+accompanies the visual focus — that is why it carries no value information.
+Measured (2026-09-28, a many2one whose current value was `SL/Salida`): the
+field's own option — a different one — reported `selected:false`, read from
+the field's own `value` key, while the highlight sat on the FIRST option:
 
 ```json
-{"name":"Cantidad ordenada","role":"menuitem","selected":true,"ref":"…>span:1"}
+{"name":"SL/Existencias/En Tránsito","role":"menuitem","selected":true,"ref":"…>span:1"}
 ```
+
+Never pick an option because it has `selected:true` — pick an option by its
+name, resolving the wanted option's own `ref`. If the highlighted option is
+the record-creation option ("Create…"), pressing Enter creates a record.
 
 Then `act click` on the wanted option's `ref`. Two calls total (open, pick) —
 never a `type` on a field with `expands`/`expanded`.

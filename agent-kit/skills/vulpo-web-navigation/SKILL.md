@@ -491,8 +491,11 @@ a value — an empty field is declared with `value: ""` (present).
 
 Sources of truth, in order of preference:
 
-1. **`checked`/`selected`/`expanded`** for selection state — direct, no
-   inference required.
+1. **`checked`/`expanded`**, and `selected` only for options of a native
+   `<select>`, for selection state — direct, no inference required. On
+   framework dropdown options, selected marks the highlighted option — the
+   one Enter would take — never the field's current value: the current value
+   comes from the field's own `value` key (full recipe in `vulpo-odoo-web`).
 2. **`value`** for field content, **before or after saving**.
 3. **`read[]`** is still useful for confirmation/chatter messages ("creado",
    "guardado") and for the content of elements the frame cannot reference yet

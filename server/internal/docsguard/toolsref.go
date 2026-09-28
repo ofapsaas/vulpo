@@ -150,7 +150,7 @@ func renderTool(b *strings.Builder, t mcp.Tool) {
 // literales de UI Odoo y código JS justificados; verificado contra el árbol
 // real 2026-09-21).
 var allowedSpanish = map[string][]int{
-	"agent-kit/skills/vulpo-odoo-web/SKILL.md":       {270, 271, 276, 341, 342},
+	"agent-kit/skills/vulpo-odoo-web/SKILL.md":       {282, 283, 288, 353, 354},
 	"agent-kit/skills/vulpo-web-navigation/SKILL.md": {249, 250, 380},
 	// fb-022: nota user-only del plan/build (popup de la extensión).
 	"agent-kit/skills/vulpo/SKILL.md": {84},
