@@ -13,6 +13,10 @@ const cmdCount = document.getElementById('cmdCount');
 const errCount = document.getElementById('errCount');
 const killSwitch = document.getElementById('killSwitch');
 
+// Versión dinámica desde el manifest (fuente única — nunca hardcodeada).
+const versionEl = document.querySelector('.version');
+if (versionEl) versionEl.textContent = `v${browser.runtime.getManifest().version}`;
+
 // State
 let allBridges = [];
 let currentStatus = null;

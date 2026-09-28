@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"vulpo/server/internal/mcp"
 )
 
 func newTestServer(t *testing.T, tokens []string) *Server {
@@ -237,6 +239,11 @@ func TestWS_Register(t *testing.T) {
 	}
 	if id, _ := msg["clientId"].(string); id == "" {
 		t.Fatal("clientId vacío")
+	}
+	// Negociación de versión (fb-022): StartServer expone la versión de
+	// producto/protocolo en el welcome (la misma pineada contra el manifest).
+	if v, _ := msg["serverVersion"].(string); v != mcp.ProductVersion {
+		t.Fatalf("welcome.serverVersion = %v, want %q (negociación ext↔server)", msg["serverVersion"], mcp.ProductVersion)
 	}
 }
 

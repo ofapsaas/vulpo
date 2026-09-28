@@ -5,8 +5,8 @@
 // x-vlp-token y serializa.
 //
 // Wire-equivalente: métodos, códigos de error y mensajes idénticos al Node.
-// Única diferencia deliberada: serverInfo.version = '0.5.2' (Go v3.1; el
-// legacy Node queda 0.0.0 con drift documentado → cutover 009).
+// Única diferencia deliberada: serverInfo.version = ProductVersion (Go v3.1;
+// el legacy Node queda 0.0.0 con drift documentado → cutover 009).
 package mcp
 
 import (
@@ -30,8 +30,17 @@ func marshalNoEscape(v any) ([]byte, error) {
 	return bytes.TrimRight(buf.Bytes(), "\n"), nil
 }
 
-// MCPProtocolVersion: constante del pin.
+// MCPProtocolVersion: constante del pin (versión del SPEC MCP — la negocia el
+// propio protocolo MCP, no es la versión de producto de Vulpo).
 const MCPProtocolVersion = "2025-06-18"
+
+// ProductVersion: versión de producto/protocolo Vulpo compartida por extensión,
+// server y agent kit. Única fuente del "0.5.2" del server: la usa
+// serverInfo.version (initialize) y el welcome del hub vía StartServer. Debe
+// ser igual a "version" de extension/manifest.json — lo pinea TestVersionPin.
+// Negociación: la extensión la manda en register (y el hub avisa en welcome),
+// el kit la manda como clientInfo.version (vlpmcp) y doctor la compara.
+const ProductVersion = "0.5.2"
 
 // Hub: interfaz mínima que las tools consumen (ruteo hacia la extensión).
 // *hub.Hub (003) la satisface.
@@ -169,7 +178,7 @@ func (s *Server) initializeResult() map[string]any {
 	result := map[string]any{
 		"protocolVersion": MCPProtocolVersion,
 		"capabilities":    map[string]any{"tools": map[string]any{}},
-		"serverInfo":      map[string]any{"name": "vulpo", "version": "0.5.2"},
+		"serverInfo":      map[string]any{"name": "vulpo", "version": ProductVersion},
 	}
 	s.mu.RLock()
 	rev := s.agentKitRevision

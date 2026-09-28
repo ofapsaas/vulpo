@@ -17,3 +17,5 @@ dist/
 extension/frame-serializer.js
 # bundle del módulo session-probe — generado por extension/odoo/build-probe.sh
 extension/session-probe-bundle.js
+# marcador de upload de AMO (web-ext) — artefacto local que nunca entra al repo público
+extension/.amo-upload-uuid

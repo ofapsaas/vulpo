@@ -542,6 +542,14 @@ function connectProfile(profile) {
 
       case 'welcome':
         log('info', `Registered with bridge`, { clientId: msg.clientId, server: msg.server, bridgeUrl: profile.bridgeUrl });
+        // Negociación de versión de protocolo (ext↔server): el server declara
+        // su versión de producto en el welcome; si difiere de la nuestra,
+        // avisamos (no bloquea: el wire es tolerante, el warn es diagnóstico).
+        if (msg.serverVersion && msg.serverVersion !== EXT_VERSION) {
+          log('warn', `Protocol version mismatch with bridge`, {
+            extension: EXT_VERSION, server: msg.serverVersion, bridgeUrl: profile.bridgeUrl,
+          });
+        }
         // Send all registered tabs to bridge after successful registration
         profile.tabs.forEach(tid => {
           browser.tabs.get(tid).then(tab => {

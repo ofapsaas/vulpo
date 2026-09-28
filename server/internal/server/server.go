@@ -73,6 +73,9 @@ func StartServer(opts Options) (*Server, error) {
 	}
 
 	h := hub.New()
+	// Negociación ext↔server: el welcome de cada register lleva la versión de
+	// producto/protocolo (la misma de extension/manifest.json — TestVersionPin).
+	h.SetProductVersion(mcp.ProductVersion)
 	tokens := map[string]bool{}
 	for _, t := range opts.Tokens {
 		tokens[t] = true

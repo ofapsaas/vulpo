@@ -6,7 +6,10 @@
 #   build-agent-kit.sh [--version X] --check   list the contents of that tarball
 #   build-agent-kit.sh -h|--help               this help
 #
-# The version defaults to 0.1.0+<git short sha>. The tarball holds a top-level
+# The version defaults to the product/protocol version in
+# extension/manifest.json (shared with the extension and the server — never
+# a build/commit number; the commit is carried separately as kitRevision).
+# The tarball holds a top-level
 # vulpo-agent-kit-<v>/ with bin/vlpmcp (static linux/amd64), skills/,
 # integrations/, install.sh, VERSION and README.md. Staging happens in $HOME/tmp.
 #
@@ -42,8 +45,11 @@ need() { command -v "$1" >/dev/null 2>&1 || die 1 "'$1' is required"; }
 need tar
 
 if [[ -z "$VERSION" ]]; then
-    need git
-    VERSION="0.1.0+$(git -C "$SRC_ROOT" rev-parse --short HEAD)"
+    # Versión de producto/protocolo: la del manifest de la extensión (fuente
+    # única compartida con el server — mcp.ProductVersion, pineada por
+    # TestVersionPin). El sha del build vive aparte, en kitRevision.
+    VERSION="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$SRC_ROOT/extension/manifest.json")"
+    [[ -n "$VERSION" ]] || die 2 "cannot resolve version from $SRC_ROOT/extension/manifest.json"
 fi
 [[ "$VERSION" =~ ^[A-Za-z0-9._+-]+$ ]] || die 1 "invalid version: $VERSION"
 

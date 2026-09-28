@@ -135,6 +135,37 @@ func TestRegister_Valid(t *testing.T) {
 	}
 }
 
+// PC-01b — negociación de versión: con SetProductVersion, el welcome lleva
+// serverVersion; sin configurar, no (compat legacy de tests).
+func TestRegister_WelcomeCarriesServerVersion(t *testing.T) {
+	th := newTestHub(t)
+	ws := &fakeWS{}
+	th.h.SetProductVersion("0.5.2")
+	th.register(t, ws, "tok1")
+
+	wel := ws.firstType("welcome")
+	if wel == nil {
+		t.Fatalf("no welcome; sent=%v", ws.messages())
+	}
+	if v, _ := wel["serverVersion"].(string); v != "0.5.2" {
+		t.Fatalf("welcome.serverVersion = %v, want 0.5.2", wel["serverVersion"])
+	}
+}
+
+func TestRegister_WelcomeWithoutProductVersion(t *testing.T) {
+	th := newTestHub(t)
+	ws := &fakeWS{}
+	th.register(t, ws, "tok1")
+
+	wel := ws.firstType("welcome")
+	if wel == nil {
+		t.Fatalf("no welcome; sent=%v", ws.messages())
+	}
+	if _, has := wel["serverVersion"]; has {
+		t.Fatalf("welcome.serverVersion no debe existir sin SetProductVersion: %v", wel)
+	}
+}
+
 // PC-02 — token inválido/ausente → 'Invalid token' + 4001, sin perfil.
 func TestRegister_InvalidToken(t *testing.T) {
 	th := newTestHub(t)

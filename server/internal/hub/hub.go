@@ -90,6 +90,10 @@ type Hub struct {
 	conns    map[WSConn]*Profile
 	// idleBudget: plazo sin respuesta ni latido tras el cual Command falla.
 	idleBudget time.Duration
+	// productVersion: versión de producto/protocolo Vulpo que este server
+	// implementa (mcp.ProductVersion vía StartServer). Va en el welcome
+	// (negociación ext↔server: la extensión compara contra su manifest).
+	productVersion string
 }
 
 func New() *Hub {
@@ -107,6 +111,22 @@ func (h *Hub) SetIdleBudget(d time.Duration) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.idleBudget = d
+}
+
+// SetProductVersion: versión de producto/protocolo que este server implementa;
+// viaja en el welcome para la negociación ext↔server. Vacía → el welcome no
+// incluye la clave (comportamiento legacy de los tests).
+func (h *Hub) SetProductVersion(v string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.productVersion = v
+}
+
+// ProductVersion: versión de producto configurada ("" si no se configuró).
+func (h *Hub) ProductVersion() string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.productVersion
 }
 
 // IdleBudget: IDLE_BUDGET efectivo.
@@ -166,9 +186,15 @@ func (h *Hub) registerProfile(ws WSConn, token string) *Profile {
 	p := &Profile{WS: ws, Tabs: map[string]any{}, Token: token}
 	h.profiles[token] = p
 	h.conns[ws] = p
+	productVersion := h.productVersion
 	h.mu.Unlock()
 
-	h.send(ws, map[string]any{"type": "welcome", "clientId": clientID})
+	welcome := map[string]any{"type": "welcome", "clientId": clientID}
+	if productVersion != "" {
+		// Negociación ext↔server: la extensión compara contra su EXT_VERSION.
+		welcome["serverVersion"] = productVersion
+	}
+	h.send(ws, welcome)
 	return p
 }
 

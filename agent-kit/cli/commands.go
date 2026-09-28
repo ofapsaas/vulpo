@@ -242,6 +242,11 @@ func runDoctor(cfg config, _ io.Reader, stdout, stderr io.Writer) int {
 		return report(stderr, initErr)
 	}
 	fmt.Fprintln(stdout, "server: ok")
+	// Negociación kit↔server: la versión de producto del server (serverInfo
+	// de initialize) sale explícita en doctor — diagnóstico anti-confusión.
+	if sv := serverVersionOf(initPayload); sv != "" {
+		fmt.Fprintf(stdout, "server version: %s\n", sv)
+	}
 
 	if errors.Is(tokenErr, errInvalidTokenFile) {
 		fmt.Fprintln(stdout, "token: invalid file")
@@ -260,6 +265,7 @@ func runDoctor(cfg config, _ io.Reader, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintln(stdout, "token: ok")
 	warnOutdatedKit(stdout, initPayload)
+	warnServerVersionMismatch(stdout, initPayload)
 
 	_, _, err := callTool(c, "vlp_listTabs", json.RawMessage("{}"))
 	if isNoExtension(err) {
@@ -293,6 +299,39 @@ func warnOutdatedKit(stdout io.Writer, initPayload []byte) {
 	}
 	fmt.Fprintf(stdout, "kit: outdated (installed %s, server expects %s); update: extract the current agent kit and run install.sh\n",
 		kitRevision, serverRevision)
+}
+
+// serverVersionOf extracts serverInfo.version from the initialize answer
+// ("" when absent or unparsable). It is the server's product/protocol version —
+// the counterpart of the kit's own version in the version negotiation.
+func serverVersionOf(initPayload []byte) string {
+	var answer struct {
+		Result struct {
+			ServerInfo struct {
+				Version string `json:"version"`
+			} `json:"serverInfo"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(initPayload, &answer); err != nil {
+		return ""
+	}
+	return answer.Result.ServerInfo.Version
+}
+
+// warnServerVersionMismatch is the kit↔server version negotiation (doctor):
+// when the server declares a product version that differs from the kit's, the
+// mismatch is reported. Warning only: it never changes the exit code, and a
+// dev build (version "dev") is never compared.
+func warnServerVersionMismatch(stdout io.Writer, initPayload []byte) {
+	if version == "" || version == "dev" {
+		return
+	}
+	serverVersion := serverVersionOf(initPayload)
+	if serverVersion == "" || serverVersion == version {
+		return
+	}
+	fmt.Fprintf(stdout, "server: version mismatch (server %s, kit %s); update the server and/or the agent kit\n",
+		serverVersion, version)
 }
 
 func isNoExtension(err error) bool {

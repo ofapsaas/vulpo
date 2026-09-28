@@ -15,11 +15,14 @@ import (
 	"strconv"
 	"syscall"
 
+	"vulpo/server/internal/mcp"
 	"vulpo/server/internal/server"
 )
 
-// version es la version del server.
-const version = "0.5.2"
+// version: la versión del server — ÚNICA FUENTE mcp.ProductVersion (la misma
+// que viaja en serverInfo de initialize, el welcome del hub y el manifest de
+// la extensión; pineada por TestVersionPin).
+var version = mcp.ProductVersion
 
 // agentKitRevision: short sha del último commit que tocó agent-kit/.
 // La inyecta scripts/build-server.sh con -X main.agentKitRevision=<sha>;
