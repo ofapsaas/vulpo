@@ -9,6 +9,14 @@
 // when at or under the cap (Q-D), readable error "screenshot: invalid
 // capture ..." on unusable captures (P4/Q-F). The recover in mcp.go is a
 // backstop, not the contract.
+//
+// Review round 2 hardening (docs/specs/fb-024-screenshot-imagen/review.md
+// §0/§3, owner-approved micro-RED 7c9dac3): F-7(a) dimension sanity cap
+// enforced after DecodeConfig and before any full decode or delivery
+// decision; F-2 full image.Decode on EVERY path (the ≤1280 passthrough
+// included) so a valid-header/corrupt-body capture fails server-side with
+// the readable error; F-5 mime/bytes consistency guard kept intact and
+// applied to the unconditional decode.
 
 package mcp
 
@@ -24,9 +32,19 @@ import (
 	"golang.org/x/image/draw"
 )
 
-// screenshotMaxSide: the normative cap on the larger of width/height (P2/Q-A).
-// Single-point revision via a second probe pass; no environment knob this cycle.
+// screenshotMaxSide: the normative delivery cap on the larger of width/height
+// (P2/Q-A). Single-point revision via a second probe pass; no environment
+// knob this cycle.
 const screenshotMaxSide = 1280
+
+// screenshotSanityMaxSide: F-7(a) dimension sanity cap on the larger of the
+// declared width/height, enforced right after DecodeConfig and BEFORE any
+// full decode or delivery decision — a crafted header can declare enormous
+// dimensions and a full decode would materialize those pixels
+// (decompression-bomb surface). Value pinned by review as 8192 px max side:
+// far above real captures and above the 1280 delivery cap (the 4000×3000
+// boundary pin must still deliver), far below the 20000×20000 rejection pin.
+const screenshotSanityMaxSide = 8192
 
 // screenshotJPEGQuality: re-encode quality when rescaling (Q-B; legible at
 // q85 per the 2026-09-26 legibility probe).
@@ -76,16 +94,34 @@ func screenshotImageParts(hubRes any) (any, error) {
 	if err != nil {
 		return imageContentResult{}, fmt.Errorf("%s: base64 decode failed: %v", screenshotErrPrefix, err)
 	}
-	cfg, format, err := image.DecodeConfig(bytes.NewReader(raw))
+	// Header-level validation first: dims without materializing pixels.
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(raw))
 	if err != nil {
 		return imageContentResult{}, fmt.Errorf("%s: bytes are not a decodable %s image: %v", screenshotErrPrefix, mimeType, err)
 	}
-	if got := "image/" + format; got != mimeType {
+	srcW, srcH := cfg.Width, cfg.Height
+	maxSide := max(srcW, srcH)
+
+	// F-7(a): dimension sanity cap BEFORE any full decode or delivery
+	// decision — a declared bomb fails here, never materializing pixels.
+	if maxSide > screenshotSanityMaxSide {
+		return imageContentResult{}, fmt.Errorf("%s: declared dimensions %dx%d exceed the %d px sanity cap", screenshotErrPrefix, srcW, srcH, screenshotSanityMaxSide)
+	}
+
+	// F-2: full decode on EVERY path after the sanity cap — the ≤1280
+	// passthrough included — so a valid-header/corrupt-body capture fails
+	// server-side with the readable error instead of being delivered.
+	src, decodedFormat, err := image.Decode(bytes.NewReader(raw))
+	if err != nil {
+		return imageContentResult{}, fmt.Errorf("%s: %s image decode failed: %v", screenshotErrPrefix, mimeType, err)
+	}
+	// F-5: the dataUrl prefix and the decoded magic bytes must agree; a
+	// contradictory capture is rejected, never delivered (guard applied to
+	// the unconditional decode, so no path can bypass it).
+	if got := "image/" + decodedFormat; got != mimeType {
 		return imageContentResult{}, fmt.Errorf("%s: dataUrl declares %s but the bytes decode as %s", screenshotErrPrefix, mimeType, got)
 	}
 
-	srcW, srcH := cfg.Width, cfg.Height
-	maxSide := max(srcW, srcH)
 	out, dstW, dstH, dstMime, rescaled := raw, srcW, srcH, mimeType, false
 	if maxSide > screenshotMaxSide {
 		// Q-A/Q-C: cap the max side, preserve aspect, integer-floor dims.
@@ -96,16 +132,6 @@ func screenshotImageParts(hubRes any) (any, error) {
 		}
 		if dstH < 1 {
 			dstH = 1
-		}
-		src, decodedFormat, err := image.Decode(bytes.NewReader(raw))
-		if err != nil {
-			return imageContentResult{}, fmt.Errorf("%s: bytes are not a decodable %s image: %v", screenshotErrPrefix, mimeType, err)
-		}
-		// Fail fast at the point of transformation: the delivered bytes must
-		// still match the dataUrl-declared mime (same guard as DecodeConfig
-		// above; the full decode re-derives the format from the magic bytes).
-		if got := "image/" + decodedFormat; got != mimeType {
-			return imageContentResult{}, fmt.Errorf("%s: dataUrl declares %s but the bytes decode as %s", screenshotErrPrefix, mimeType, got)
 		}
 		dst := image.NewRGBA(image.Rect(0, 0, dstW, dstH))
 		draw.CatmullRom.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Src, nil)
