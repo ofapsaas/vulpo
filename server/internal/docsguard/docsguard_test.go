@@ -439,3 +439,69 @@ func TestAllowedSpanishLiterals(t *testing.T) {
 		}
 	}
 }
+
+// ——— fb-024-selected-es-resaltado (RED, stage 3) ———
+// Contrato: `selected` en opciones de dropdown de framework marca la opción
+// resaltada (target de Enter), NUNCA el valor actual del campo. Mismas
+// convenciones que el set vision-subagente: matching literal case-insensitive
+// + whitespace colapsado vía normalize(), archivos por sufijo vía skillFile /
+// scanTargets, sin números de línea (spec §3.2).
+
+const odooWebSkillSuffix = "agent-kit/skills/vulpo-odoo-web/SKILL.md"
+
+// TestNoSelectedIsCurrentValue (P1): tripwire de AUSENCIA sobre TODO el set
+// escaneado — ningún doc puede afirmar que `selected` marca el valor actual.
+// Fragments prohibidos del spec §3.2 P1 (la frase hoy existente en odoo-web
+// l.49-50 los porta; en GREEN la tripwire queda permanente). Fail-soft: un
+// solo run reporta TODAS las violaciones (archivo + fragmento) con t.Errorf,
+// para que el RED liste el conjunto completo de ofensas.
+func TestNoSelectedIsCurrentValue(t *testing.T) {
+	root := repoRoot(t)
+	forbidden := []string{
+		"currently-selected one carrying",
+		"carrying `selected:true`",
+	}
+	for _, f := range scanTargets(t, root) {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+		rel, _ := filepath.Rel(root, f)
+		got := normalize(string(raw))
+		for _, frag := range forbidden {
+			if strings.Contains(got, normalize(frag)) {
+				t.Errorf("%s: forbidden fragment %q — selected marca la opción resaltada, nunca el valor actual (P1, spec fb-024-selected-es-resaltado)", rel, frag)
+			}
+		}
+	}
+}
+
+// TestOdoowebSelectedIsHighlight (P2): la sección closed-sets de
+// vulpo-odoo-web porta la regla corregida completa (N1–N4): meaning de
+// `selected`, valor actual leído del `value` del propio campo, pick por name
+// (nunca por selected:true) y el hazard de creación con Enter.
+func TestOdoowebSelectedIsHighlight(t *testing.T) {
+	root := repoRoot(t)
+	requireFragments(t, root, skillFile(t, root, odooWebSkillSuffix),
+		"selected marks the highlighted option",
+		"never the field's current value",
+		"the field's own `value` key",
+		"never pick an option because it has",
+		"pick an option by its name",
+		"pressing enter creates a record",
+	)
+}
+
+// TestNavSkillSelectedScoped (P3): "Sources of truth" item 1 del SKILL nav
+// queda scopeado — `selected` como verdad directa de selección SOLO para
+// opciones de un <select> nativo; para dropdowns de framework marca la opción
+// resaltada, nunca el valor actual (que viene del `value` del campo).
+func TestNavSkillSelectedScoped(t *testing.T) {
+	root := repoRoot(t)
+	requireFragments(t, root, skillFile(t, root, navSkillSuffix),
+		"selected marks the highlighted option",
+		"only for options of a native `<select>`",
+		"never the field's current value",
+		"the field's own `value` key",
+	)
+}
