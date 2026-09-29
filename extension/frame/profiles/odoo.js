@@ -12,9 +12,15 @@
 // un campo de formulario, `o_invalid_cell` en una celda de lista editable.
 // `fieldNameAttribute: 'name'` — el atributo `name` del widget de campo trae
 // el nombre técnico del campo en Odoo.
+//
+// Marcador de carga de la transición SPA, medido en campo 2026-09-29:
+// `.o_loading_indicator` (único marcador capturado COMPLETO, §2 de
+// fb-024-settle-carga-de-sitio). No hay marcador de boot verificado (gap
+// declarado) — este es el único selector de carga del perfil.
 export const odooValidityProfile = {
   id: 'odoo',
   detect: (doc) => !!doc.querySelector('.o_web_client'),
   invalidMarkerSelector: '.o_field_invalid, .o_invalid_cell',
   fieldNameAttribute: 'name',
+  loadingMarkerSelector: '.o_loading_indicator',
 };

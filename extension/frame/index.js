@@ -5,6 +5,7 @@
 // fb-018-006 (§2.4): waitForSettle — predicado temporal de quiescencia,
 // transitorio por llamada (observadores propios, desconectados al resolver).
 import { serializeFrame as coreSerializeFrame } from './serializer.js';
+import { waitForSettle as coreWaitForSettle } from './settle.js';
 import { odooValidityProfile } from './profiles/odoo.js';
 
 // fb-020-005 §3.7/§10.3 — composición: el entry del bundle INYECTA el
@@ -20,7 +21,15 @@ export function serializeFrame(root, options) {
 }
 export { resolveRef } from './resolver.js';
 export { performAction } from './act.js';
-export { waitForSettle } from './settle.js';
+
+// fb-024-settle-carga-de-sitio (§3.3, D-3): waitForSettle compuesto exactamente
+// como serializeFrame — el registro de convenciones de sitio (que alimenta el
+// veto del marcador de carga) viaja por `validityProfiles` inyectado por
+// default; el explícito prevalece (spread order). El re-export crudo que
+// ignoraba la opción desaparece.
+export function waitForSettle(doc, opts, serializeFn) {
+  return coreWaitForSettle(doc, { validityProfiles: VALIDITY_PROFILES, ...opts }, serializeFn);
+}
 // fb-020-002 v2 (§2.1): escritura + observación del campo escrito.
 export { performActionAndObserve, performFill } from './observe.js';
 // fb-020-003 v3.3 (§2.2, P24): lector de la pregunta nativa pendiente. El

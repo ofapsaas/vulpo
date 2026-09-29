@@ -1,4 +1,8 @@
 // settle.js — fb-018-006-readiness-signal (content script, isolated world).
+// fb-024-settle-carga-de-sitio §3.3: el veto §2.2.6 consulta además el marcador
+// de carga del perfil de sitio activo (D-4/D-5/D-7), sin que este módulo
+// importe `profiles/` (I-1): las convenciones viajan por `opts.validityProfiles`.
+//
 // Predicado temporal de quiescencia (spec §2.2): `waitForSettle(doc, opts,
 // serializeFn)` observa el DOM con MutationObservers TRANSITORIOS por llamada
 // hasta que el contenido observable se aquiesta `quietMs` (o vence `waitMs`) y
@@ -30,6 +34,12 @@ const DEFAULT_QUIET_MS = 300;
 // Selectores del veto §2.2.6 — nombrados por estándar (ARIA 1.2 + HTML),
 // jamás clases ni texto de sitio (I-5). El veto extiende, nunca produce true.
 const INDICADOR_SELECTOR = '[aria-busy="true"], [role="progressbar"], progress';
+
+// El marcador de carga del SITIO (opcional, fb-024) llega como dato por
+// `opts.validityProfiles` (la MISMA clave del serializer, D-3); este módulo no
+// conoce `profiles/` (I-1). El perfil activo se resuelve por evaluación de
+// quietud vía detectActiveProfile (D-4/D-7: stateless, sin latch).
+import { detectActiveProfile } from './validity-profiles.js';
 
 // Opciones del observer: supraconjunto del root serializado (document.body) —
 // contar un supraconjunto es conservador (I-B). El observador de
@@ -80,6 +90,11 @@ export async function waitForSettle(doc, opts, serializeFn) {
   const waitMs = positiveMs(opts && opts.waitMs, DEFAULT_WAIT_MS);
   const quietMs = positiveMs(opts && opts.quietMs, DEFAULT_QUIET_MS);
   const deadline = t0 + waitMs;
+  // Registro de convenciones de sitio (fb-024, D-3): misma clave que el
+  // serializer. Nunca se importa `profiles/` (I-1); el perfil activo se
+  // resuelve por evaluación vía detectActiveProfile (D-4/D-7). No-array
+  // (Array.isArray guard) ⇒ sin perfil reconocido.
+  const validityProfiles = (opts && opts.validityProfiles) || undefined;
 
   // safeSerialize: la serialización jamás rompe el wait (falla interna ⇒
   // conservador, §2.2.5). Devuelve el Frame o null; si serializeFn LANZA,
@@ -203,8 +218,8 @@ export async function waitForSettle(doc, opts, serializeFn) {
 
     // Veto §2.2.6: presente el indicador ⇒ la quietud no declara settled:true.
     // Consulta el árbol observable (documento + shadow roots seguidos). Una
-    // excepción de consulta cuenta como indicador (veto de una sola dirección:
-    // extiende, jamás fuerza settled:true).
+    // excepción de consulta del query ESTÁNDAR cuenta como indicador (veto de
+    // una sola dirección, I-2 sin cambios: extiende, jamás fuerza settled:true).
     const hasLoadingIndicator = () => {
       try {
         if (doc && typeof doc.querySelector === 'function' && doc.querySelector(INDICADOR_SELECTOR)) return true;
@@ -213,6 +228,24 @@ export async function waitForSettle(doc, opts, serializeFn) {
         }
       } catch {
         return true;
+      }
+      // Marcador de carga del SITIO (fb-024, D-4/D-5/D-7): consulta el selector
+      // de carga del perfil activo sobre el MISMO alcance (documento + shadow
+      // roots del Set compartido). Perfil resuelto por evaluación (stateless,
+      // sin latch). Fail-open (D-5): selector no-string o SyntaxError de
+      // querySelector = "sin marcador de sitio", sin throw — un perfil roto no
+      // rompe settle ni extiende todas las esperas hasta waitMs (I-3).
+      const profile = detectActiveProfile(doc, validityProfiles);
+      if (!profile) return false;
+      const sel = profile.loadingMarkerSelector;
+      if (typeof sel !== 'string' || sel.length === 0) return false;
+      try {
+        if (doc && typeof doc.querySelector === 'function' && doc.querySelector(sel)) return true;
+        for (const sr of shadowRoots) {
+          if (typeof sr.querySelector === 'function' && sr.querySelector(sel)) return true;
+        }
+      } catch {
+        return false;
       }
       return false;
     };
