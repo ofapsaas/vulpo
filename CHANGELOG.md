@@ -2,6 +2,21 @@
 
 All notable changes to Vulpo are documented here. Format: Keep a Changelog.
 
+## [0.5.3] — 2026-09-29
+
+### Added
+
+- `settle` site-loading-indicator veto: the §2.2.6 loading-indicator veto now
+  also consults the active site profile's `loadingMarkerSelector`
+  (`profiles/odoo.js: '.o_loading_indicator'`, measured in field). A page that
+  still shows its own "Cargando" marker is never declared `settled:true`.
+- `detectActiveProfile` guards `detect` with try/catch: a broken profile
+  degrades validity but can never break serialization or the act/navigate
+  frame fold (settles the robustness half of fb-020-005 review §5.4).
+- Agent-kit SKILLs corrected: `selected` on dropdown options marks the
+  highlighted option (the one Enter takes), never the field's current value —
+  the current value is read from the field's own `value` key.
+
 ## [0.5.2] — 2026-09-21
 
 ### Removed

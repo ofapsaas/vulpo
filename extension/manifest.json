@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Vulpo MCP — Browser Bridge",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Let AI agents operate your real Firefox — pages, forms, clicks and Odoo — through MCP. Companion server required.",
   "author": "Pablo Manuel Rizzo",
 
