@@ -422,6 +422,35 @@ function contextFor(el, root, activeDialog, dialogName) {
       return labels;
     }
   }
+  // Cláusula 0b (fb-023-001, D-1..D-4): si `el` NO es cell-like (un control
+  // dentro de una celda — el caso medido en campo 2026-09-25, donde los
+  // checkboxes de un diálogo llevaban context sin la fila), subir desde
+  // `el.parentElement` buscando el ancestro cell-like más cercano (mismo
+  // discriminante `isCellLike`, D-3) y RECICLAR el `gridRowColContext` de esa
+  // celda verbatim (reuso, una sola fuente — enmienda 6). Mismo criterio de
+  // retorno temprano y mismo orden [dialogName, fila/columna] que la 0a (D-1).
+  // D-2 (defense-in-depth): la subida se detiene en `root` y nunca cruza el
+  // propio `closestGridRoot(el)` — un control en una tabla anidada hereda la
+  // fila de SU tabla, no la de la exterior. D-4: el ancestro cell-like más
+  // cercano con contexto vacío abandona la rama (no se sube a un ancestro más
+  // distante); el control cae al walk `group|region` vigente.
+  if (!isCellLike(el)) {
+    const grid = closestGridRoot(el);
+    if (grid) {
+      let cur = el.parentElement;
+      while (cur && cur !== root && cur !== grid) {
+        if (isCellLike(cur)) {
+          const rowCol = (gridRowColContext(cur) || []).filter(Boolean);
+          if (rowCol.length) {
+            labels.push(...rowCol);
+            return labels;
+          }
+          break; // D-4: ancestro más cercano sin contexto de fila ⇒ abandonar la rama
+        }
+        cur = cur.parentElement;
+      }
+    }
+  }
   let cur = el.parentElement;
   while (cur && cur !== root) {
     const role = getRole(cur);
