@@ -125,6 +125,27 @@ function leerDoc(ruta, etiqueta) {
  * comillas dobles, tolera llaves de cierre extra de la llamada contenedora,
  * p.ej. `frame: {roles: ["textbox"]}}`). Devuelve el string del objeto.
  */
+/**
+ * Escáner de corchetes gemelo de extraerObjetoBalanceado: índice del corchete
+ * que cierra el array que arranca en `pos`, tolerando strings con comillas
+ * dobles y escapes dentro. Sin cierre balanceado: -1.
+ */
+function corcheteCierreBalanceado(s, pos) {
+  let enCadena = false;
+  let escape = false;
+  for (let i = pos + 1; i < s.length; i++) {
+    const c = s[i];
+    if (enCadena) {
+      if (escape) escape = false;
+      else if (c === '\\') escape = true;
+      else if (c === '"') enCadena = false;
+    } else if (c === '"') enCadena = true;
+    else if (c === '[') return corcheteCierreBalanceado(s, i); // anidado
+    else if (c === ']') return i;
+  }
+  return -1;
+}
+
 function extraerObjetoBalanceado(linea, etiquetaOrigen) {
   const inicio = linea.indexOf('{');
   if (inicio < 0) {
@@ -153,8 +174,8 @@ function extraerObjetoBalanceado(linea, etiquetaOrigen) {
 
 /**
  * Parser de opciones: claves identificador SIN comillas, valores string "…",
- * array de strings [...], número o true/false. Limitado AL OBJETO DE OPCIONES
- * mostrado en los SKILL; sin eval (C-2 / spec §3.2).
+ * array VALIDADO de strings [...], número o true/false. Limitado AL OBJETO
+ * DE OPCIONES mostrado en los SKILL; sin eval (C-2 / spec §3.2).
  */
 function parsearOpciones(linea, etiquetaOrigen) {
   const s = extraerObjetoBalanceado(linea, etiquetaOrigen);
@@ -177,13 +198,28 @@ function parsearOpciones(linea, etiquetaOrigen) {
       return JSON.parse(`"${m[1]}"`);
     }
     if (s[pos] === '[') {
-      const cierre = s.indexOf(']', pos);
-      if (cierre < 0) FALLA(`array sin cerrar para ${clave}`);
-      const items = s
-        .slice(pos + 1, cierre)
-        .split(',')
-        .map((x) => x.trim().replace(/^"|"$/g, ''))
-        .filter(Boolean);
+      // Hallazgo 1 del review (fb-023-003 §2): el array se VALIDA, no se
+      // desinfecta. Antes se eliminaban comillas (`replace(/^"|"$/g,'')`) y
+      // una receta mal formada se aceptaba silenciosamente: `roles:[textbox]`
+      // (sin comillas) se parseaba como ["textbox"]. Ahora: array completo
+      // balanceado (strings/escapes respetados), validado como JSON y con
+      // cada miembro string. Cualquier desvío es fallo de infraestructura
+      // (fail-loud, C-2) — NO RED válido ni verde vacuo.
+      const cierreRel = corcheteCierreBalanceado(s, pos);
+      if (cierreRel < 0) FALLA(`array sin cerrar para ${clave}`);
+      const cierre = cierreRel; // índice absoluto en s
+      if (cierre >= fin) FALLA(`array de ${clave} se extiende más allá del objeto de opciones`);
+      const literal = s.slice(pos, cierre + 1);
+      let items;
+      try {
+        items = JSON.parse(literal);
+      } catch {
+        FALLA(`array de ${clave} no es JSON válido (¿miembro sin comillas?) — literal: ${literal}`);
+      }
+      if (!Array.isArray(items)) FALLA(`array de ${clave} no parseó a array`);
+      if (items.some((x) => typeof x !== 'string')) {
+        FALLA(`array de ${clave} con miembros NO string — literal: ${literal}`);
+      }
       pos = cierre + 1;
       return items;
     }
@@ -426,11 +462,11 @@ test('P1: cada una de las seis queries publicadas aplicada a F8 conserva exactam
     assert.equal(precio.name, '', 'guarda previa: el input sigue sin nombre accesible (name "")');
     assert.equal(cantidad.column, 'Cantidad', 'guarda previa (fb-023-002): column "Cantidad" heredada de la celda');
     assert.equal(precio.column, 'Precio', 'guarda previa (fb-023-002): column "Precio" heredada de la celda');
-    assert.equal(
-      'context' in cantidad && 'context' in precio,
-      false,
-      'guarda previa: la fila de F8 no aporta context (sin celda con nombre en la fila)',
-    );
+    // Hallazgo 2 del review (fb-023-003 §2): la ausencia de context se
+    // comprueba POR SEPARADO en cada input (el `&&` previo sólo detectaba
+    // context presente en AMBOS a la vez).
+    assert.equal('context' in cantidad, false, 'guarda previa: input#cantidad sin context (sin celda con nombre en la fila)');
+    assert.equal('context' in precio, false, 'guarda previa: input#precio sin context (sin celda con nombre en la fila)');
   });
 
   for (const receta of todas) {
@@ -438,6 +474,15 @@ test('P1: cada una de las seis queries publicadas aplicada a F8 conserva exactam
       const doc = makeDom(F8);
       const root = doc.body;
       const frame = serializeFrame(root, receta.opciones);
+      // Hallazgo 2 del review (fb-023-003 §2): cardinalidad EXACTAMENTE dos
+      // — ni elementos adicionales ni duplicados pueden pasar.
+      const elementos = allElements(frame);
+      assert.equal(
+        elementos.length,
+        2,
+        `P1/${receta.etiqueta}: el frame sobre F8 debe tener EXACTAMENTE 2 elementos (los dos inputs) — ` +
+          `tiene ${elementos.length}: ${JSON.stringify(allRefs(frame))}`,
+      );
       const cantidad = emitido(frame, root, doc.getElementById('cantidad'), `P1/${receta.etiqueta}: input#cantidad`);
       const precio = emitido(frame, root, doc.getElementById('precio'), `P1/${receta.etiqueta}: input#precio`);
       // Identidad por resolveRef: el ref emitido resuelve el nodo correcto
@@ -666,9 +711,12 @@ test('P7 (T-doc, RED documental): los SKILL contienen la regla D-3/D-4/D-5 en in
   const docOdoo = leerDoc(PATH_ODOO, 'vulpo-odoo-web/SKILL.md');
   const docNav = leerDoc(PATH_NAV, 'vulpo-web-navigation/SKILL.md');
 
-  // Verificación SEMÁNTICA contra D-3/D-4/D-5/D-6 (no igualdad literal de
-  // párrafos — spec §3.2 P7). Cada regla es una condición que debe estar
-  // presente en GREEN; en RED se REGISTRAN los incumplimientos actuales.
+  // Verificación de frases LITERALES, no semántica: cada regla chequea un
+  // fragmento del texto exacto que prescribe D-6 (la interpretación semántica
+  // la hace el reviewer, no el test; una reformulación equivalente rompe el
+  // chequeo literal, que es el precio de automatizar el D-6 prescriptivo).
+  // regla debe estar presente en GREEN; en RED se REGISTRAN los
+  // incumplimientos actuales.
   const reglas = [
     {
       id: 'O1 (odoo, D-6): la receta de formularios densos manda omitir namedOnly para listas editables',
