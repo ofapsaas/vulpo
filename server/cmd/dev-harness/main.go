@@ -428,6 +428,7 @@ const nativeDialogPageHTML = `<!doctype html>
   <input id="i-text" aria-label="texto">
   <input id="i-plain" aria-label="sin-listeners">
   <input id="i-focus" aria-label="foco">
+  <input id="i-confirm" aria-label="confirmar">
   <select id="s-opt" aria-label="opciones"><option value="a">a</option><option value="b">b</option></select>
 
   <div id="st-intacto" role="status">intacto:true</div>
@@ -519,6 +520,18 @@ const nativeDialogJS = `(function () {
     // "sin-dialogo": el trigger no llama a ninguna función de diálogo.
   });
 
+  // confirm-on-input (fb-024 P7): el listener input de #i-confirm abre un
+  // confirm nativo al escribir — reproduce el bloqueo de act type que
+  // fb-020-003 no detecta (D-11). CSP script-src 'self': sin script inline.
+  if (step === "confirm-on-input") {
+    var iConfirm = document.getElementById("i-confirm");
+    if (iConfirm) {
+      iConfirm.addEventListener("input", function () {
+        setResultado(confirm("¿Confirmar el cambio?"));
+      });
+    }
+  }
+
   stListo.textContent = "listo:" + step;
 })();`
 
@@ -528,6 +541,8 @@ const nativeDialogJS = `(function () {
 var nativeDialogSteps = map[string]bool{
 	"confirm-sync": true, "alert-sync": true, "prompt-sync": true,
 	"sin-dialogo": true, "shim-pagina": true, "confirm-tarde": true,
+	// fb-024 P7: el input #i-confirm abre un confirm en su listener `input`.
+	"confirm-on-input": true,
 }
 
 // startTestPage: sirve testPageHTML (ruta /) y la página bootstrap
@@ -2046,11 +2061,13 @@ func main() {
 	// fb-020-007: VLP_NAVHANG=s1,p12,p13,p19,p21,p27 corre sólo esos escenarios
 	// sobre el boot de FRAME_E2E.
 	navHang := os.Getenv("VLP_NAVHANG")
-	frameE2E := os.Getenv("VLP_FRAME_E2E") == "1" || navHang != ""
+	actTimeout := os.Getenv("VLP_ACTTIMEOUT") == "1"
+	frameE2E := os.Getenv("VLP_FRAME_E2E") == "1" || navHang != "" || actTimeout
 	if os.Getenv("VLP_DEV_HARNESS") != "1" && !frameE2E {
 		fmt.Println("dev-harness: opt-in — set VLP_DEV_HARNESS=1 (checks Odoo) or VLP_FRAME_E2E=1 (E2E invalidación) to run.")
 		fmt.Println("  VLP_DEV_HARNESS=1 go run ./cmd/dev-harness")
 		fmt.Println("  VLP_FRAME_E2E=1  go run ./cmd/dev-harness")
+		fmt.Println("  VLP_ACTTIMEOUT=1 go run ./cmd/dev-harness   # P7 fb-024 (act type colgado)")
 		os.Exit(0)
 	}
 
@@ -2267,6 +2284,18 @@ func main() {
 	// ---- Gate FRAME_E2E (fb-017-004 + fb-018-006): E2E de invalidación y de
 	// settle. Boot compartido (server + seed + web-ext + ensureSession). Sin
 	// checks de Odoo (PC3/PC4/PC9-10 quedan en el gate VLP_DEV_HARNESS=1).
+	// fb-024 P7: VLP_ACTTIMEOUT=1 corre SOLO el escenario del act colgado.
+	if frameE2E && actTimeout {
+		atOK := connected && runActTimeoutE2E(serverPort, testPageURL)
+		fmt.Println("\n=== RESULT ===")
+		cleanup()
+		if atOK {
+			fmt.Println("act-timeout: PASS (fb-024 P7)")
+			os.Exit(0)
+		}
+		fmt.Println("act-timeout: FAIL (fb-024 P7)")
+		os.Exit(1)
+	}
 	if frameE2E && navHang != "" {
 		navOK := connected && runNavHangE2E(serverPort, testPageURL, navHang)
 		fmt.Println("\n=== RESULT ===")

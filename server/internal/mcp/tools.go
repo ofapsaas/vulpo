@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"vulpo/server/internal/odooregistry"
@@ -92,6 +93,33 @@ func validateFrameKeys(frameValue any) error {
 	return nil
 }
 
+// declaredWaitMaxMs: techo de una espera declarada por parámetro (fb-024 D-2).
+// El hub NO recorta (I-4): este rechazo previo al despacho es la única cota.
+const declaredWaitMaxMs = 60000
+
+// checkDeclaredWaitMax (fb-024 D-2): rechaza una espera declarada numérica por
+// encima del techo con el texto exacto del contrato. Ausente, no numérica o
+// ≤ 0 devuelve nil — se relaya verbatim y los defaults viven en la extensión.
+func checkDeclaredWaitMax(tool, param string, v any) error {
+	ms, ok := v.(float64)
+	if !ok || ms <= declaredWaitMaxMs {
+		return nil
+	}
+	return fmt.Errorf("%s: %s must be at most %d ms (got %s); nothing was dispatched",
+		tool, param, declaredWaitMaxMs, strconv.FormatFloat(ms, 'f', -1, 64))
+}
+
+// checkFrameDeclaredWait: valida `frame.waitMs` cuando `frame` es un objeto
+// (fb-024 D-2: vlp_act.frame.waitMs y vlp_navigate.frame.waitMs). frame ausente
+// o no-objeto no tiene espera declarada que validar.
+func checkFrameDeclaredWait(tool string, frameValue any) error {
+	frame, ok := frameValue.(map[string]any)
+	if !ok {
+		return nil
+	}
+	return checkDeclaredWaitMax(tool, "frame.waitMs", frame["waitMs"])
+}
+
 // RegisterAllTools: registra las 33 tools (19 vlp_* + 2 frame fb-017 +
 // 12 odoo_* — fb-019-002, sin prefijo fb_) contra el hub. El registry
 // odooregistry (fb-013-003) lo usan las tools odoo.
@@ -160,7 +188,7 @@ func RegisterAllTools(s *Server, hub Hub, helpFile string, odoo *odooregistry.Re
 	})
 
 	s.RegisterTool(Tool{
-		Name: "vlp_navigate", Description: "Navigate a browser tab to a specified URL. Without frame, returns {success:true, tabId, url} as soon as the navigation is dispatched — that is all success:true asserts: the navigation was sent, not that the destination document exists or loaded. Optional frame (object, default absent): folds a vlp_getFrame read into this same call, so you get the destination map without a second MCP round trip. Presence is the opt-in switch; frame:{} requests the fold with defaults, no separate boolean exists. Accepted keys, same vocabulary and semantics as vlp_getFrame — page (default 1), maxElementsPerPage (default 200), include (\"sections\"/\"both\", default \"sections\"), roles, namedOnly, settle, waitMs (default 5000), quietMs (default 300); an unknown key inside frame is rejected with a tool error naming it, and nothing is dispatched. Unlike getFrame, settle defaults to true inside the fold — a folded map with no wait for quiescence would arrive mid-update and you would have to re-read anyway, defeating the point; pass frame:{settle:false} for an immediate, cheap read instead. roles/namedOnly are not a convenience trim: they are what makes page 1 of the destination map sufficient on a real form — without narrowing, the agent re-reads regardless and the fold saves nothing. With frame, success:true changes meaning: it means the destination document exists and was serialized (or, if the navigation commit did not land within its deadline, success:true with frame.invalidation.settled:false and frame.invalidation.navigating:true, and the map still travels). Without frame, success keeps its current despatch-only meaning; the change of meaning applies only when frame is present. Caveat: with frame the call also blocks while the map is read — worst case twice frame.waitMs (the second wait caps a navigation commit), default 10 s. Keep that total within your MCP client timeout budget.",
+		Name: "vlp_navigate", Description: "Navigate a browser tab to a specified URL. Without frame, returns {success:true, tabId, url} as soon as the navigation is dispatched — that is all success:true asserts: the navigation was sent, not that the destination document exists or loaded. Optional frame (object, default absent): folds a vlp_getFrame read into this same call, so you get the destination map without a second MCP round trip. Presence is the opt-in switch; frame:{} requests the fold with defaults, no separate boolean exists. Accepted keys, same vocabulary and semantics as vlp_getFrame — page (default 1), maxElementsPerPage (default 200), include (\"sections\"/\"both\", default \"sections\"), roles, namedOnly, settle, waitMs (default 5000), quietMs (default 300); an unknown key inside frame is rejected with a tool error naming it, and nothing is dispatched. Unlike getFrame, settle defaults to true inside the fold — a folded map with no wait for quiescence would arrive mid-update and you would have to re-read anyway, defeating the point; pass frame:{settle:false} for an immediate, cheap read instead. roles/namedOnly are not a convenience trim: they are what makes page 1 of the destination map sufficient on a real form — without narrowing, the agent re-reads regardless and the fold saves nothing. With frame, success:true changes meaning: it means the destination document exists and was serialized (or, if the navigation commit did not land within its deadline, success:true with frame.invalidation.settled:false and frame.invalidation.navigating:true, and the map still travels). Without frame, success keeps its current despatch-only meaning; the change of meaning applies only when frame is present. Caveat: with frame the call also blocks while the map is read — worst case twice frame.waitMs (the second wait caps a navigation commit), default 10 s. Keep that total within your MCP client timeout budget. A numeric frame.waitMs above 60000 is rejected with a tool error before dispatch and nothing reaches the extension (at most 60000).",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -174,6 +202,9 @@ func RegisterAllTools(s *Server, hub Hub, helpFile string, odoo *odooregistry.Re
 			url := strArg(params, "url")
 			if strings.TrimSpace(url) == "" {
 				return nil, fmt.Errorf("navigate requires url")
+			}
+			if err := checkFrameDeclaredWait("vlp_navigate", params["frame"]); err != nil {
+				return nil, err
 			}
 			t := tabID(params)
 			navParams := map[string]any{"tabId": t, "url": url}
@@ -387,11 +418,14 @@ func RegisterAllTools(s *Server, hub Hub, helpFile string, odoo *odooregistry.Re
 			"properties": map[string]any{
 				"tabId":    map[string]any{"type": "number", "description": "ID of the tab"},
 				"selector": map[string]any{"type": "string", "description": "CSS selector to wait for"},
-				"timeout":  map[string]any{"type": "number", "description": "Max wait time in ms", "default": 5000},
+				"timeout":  map[string]any{"type": "number", "description": "Max wait time in ms (optional; default 5000, enforced by the extension, not by this server); a numeric value above 60000 is rejected before dispatch (at most 60000)", "default": 5000},
 			},
 			"required": []any{"tabId"},
 		},
 		Handler: func(params map[string]any, token string) (any, error) {
+			if err := checkDeclaredWaitMax("vlp_waitForElement", "timeout", params["timeout"]); err != nil {
+				return nil, err
+			}
 			t := tabID(params)
 			return hub.Command(token, Command{Command: "waitForElement", Params: map[string]any{"tabId": t, "selector": strArg(params, "selector"), "timeout": params["timeout"]}, TabID: t})
 		},
@@ -428,7 +462,7 @@ func RegisterAllTools(s *Server, hub Hub, helpFile string, odoo *odooregistry.Re
 				"roles":              map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Keep only elements whose accessible role is in this list (optional, never applied by default)"},
 				"namedOnly":          map[string]any{"type": "boolean", "description": "Keep only elements with a non-empty accessible name (optional, never applied by default)"},
 				"settle":             map[string]any{"type": "boolean", "description": "Wait for the frame to stabilize (quiet window without DOM mutations, then serialize without concurrent mutations) and report the verdict as invalidation.settled/waitedMs (optional, never applied by default)"},
-				"waitMs":             map[string]any{"type": "number", "description": "Max wait deadline in ms when settle is requested (optional; default 5000, enforced by the extension, not by this server)"},
+				"waitMs":             map[string]any{"type": "number", "description": "Max wait deadline in ms when settle is requested (optional; default 5000, enforced by the extension, not by this server); a numeric value above 60000 is rejected before dispatch (at most 60000)"},
 				"quietMs":            map[string]any{"type": "number", "description": "Quiet window in ms with zero DOM mutations required to declare settled (optional; default 300, enforced by the extension, not by this server)"},
 			},
 			"required": []any{"tabId"},
@@ -437,6 +471,9 @@ func RegisterAllTools(s *Server, hub Hub, helpFile string, odoo *odooregistry.Re
 			t := tabID(params)
 			if t == "" {
 				return nil, fmt.Errorf("getFrame requires tabId")
+			}
+			if err := checkDeclaredWaitMax("vlp_getFrame", "waitMs", params["waitMs"]); err != nil {
+				return nil, err
 			}
 			// fb-018-001 §2.5 — forward verbatim. Los opcionales nuevos se
 			// insertan SOLO si el request los trae: una clave presente en nil
@@ -476,12 +513,12 @@ func RegisterAllTools(s *Server, hub Hub, helpFile string, odoo *odooregistry.Re
 		"action":  map[string]any{"type": "string", "description": "Action to perform (click/type/focus/select)"},
 		"value":   map[string]any{"type": "string", "description": "Text to write for type / option for select (required string for type/select; \"\" clears the field)"},
 		"force":   map[string]any{"type": "boolean", "description": "Bypass the inert guard and act even on an element covered by an open modal dialog (optional, default false)"},
-		"waitMs":  map[string]any{"type": "number", "description": "For action:\"type\" with ok:true, max wait deadline in ms while observing the written field settle (optional; default 5000, enforced by the extension, not by this server)"},
+		"waitMs":  map[string]any{"type": "number", "description": "For action:\"type\" with ok:true, max wait deadline in ms while observing the written field settle (optional; default 5000, enforced by the extension, not by this server); a numeric value above 60000 is rejected before dispatch (at most 60000)"},
 		"quietMs": map[string]any{"type": "number", "description": "For action:\"type\" with ok:true, quiet window in ms with zero DOM mutations and zero change to the written field's value required to declare settled (optional; default 300, enforced by the extension, not by this server)"},
 		"frame":   map[string]any{"type": "object", "description": "Optional object to fold the map read (getFrame) into the response; present keys are relayed verbatim to the extension (optional, default absent)"},
 	}
 	s.RegisterTool(Tool{
-		Name: "vlp_act", Description: "Execute an action (click/type/focus/select) on an element resolved by ref in a browser tab. For type and select the text parameter is value (a string, required; value:\"\" clears the field); unknown arguments (not declared in the input schema) (e.g. text instead of value) are rejected with a tool error naming them and nothing is dispatched. Returns {ok} plus, for action:\"type\" with ok:true, an observation of the written field: after a successful dispatch it waits for the field to settle (waitMs default 5000, quietMs default 300) and adds value (the field's text when resolved), settled (a TEMPORAL verdict — it does NOT affirm the site finished processing, and it covers only the field written, never derived values or the form's overall state), and waitedMs; if the element left the document during the wait, it returns detached:true with settled:false, without value. Before writing a number, determine the site's own numeric formatting convention (with the site's dedicated tool if one exists, or from the numbers the page already shows) and write the text in that convention; compare the number in value against the target value under that same convention. click/focus/select and every ok:false case (including type) are unaffected and, apart from the nativeDialog responses described below, return exactly {ok} or {ok:false, stale|error}, or, if the element is covered by an open modal dialog, {ok:false, inert:true, error}, or, if the target control is disabled (HTML :disabled, including inside <fieldset disabled>, nothing dispatched), {ok:false, disabled:true, error} — enable the control before retrying. force:true bypasses only the inert check, never disabled; forcing an action behind a real modal dialog can leave the app in an inconsistent state (use it only for dialogs misclassified as modal). While a full-page navigation is in flight (fb-018-006 amendment) the response also carries invalidation.navigating: true (present-only) and the action may land in the previous document. Caveat: with action:\"type\" the call may block until settled or waitMs elapses — keep waitMs within your MCP client timeout budget, as with getFrame's settle. nativeDialog:{type, message, pending:true} reports a native confirm/alert/prompt dialog opened by the page and waiting for a human. If a click opens one, the call returns early with ok:true and nativeDialog. If a native dialog is already pending in the tab, every action returns ok:false with nativeDialog and does not dispatch anything; force does not skip this check. Vulpo does not answer the dialog itself — tell the human, quoting message, and re-read with getFrame afterward. Only click detects a dialog: type, focus, and select whose own dispatch opens one may block the call instead. A dialog opened after the call has already returned is not detected. navigate and closeTab on that tab close a pending native dialog without a human answer (the page receives false/null); do not use them to get out of the question unless the human agrees. Optional frame (object, default absent): folds a vlp_getFrame read of the resulting map into this same call, so a caller who needs to see the screen after acting does not need a second MCP round trip. Presence is the opt-in switch — frame:{} requests the fold with defaults, there is no separate boolean. Accepted keys, same vocabulary and semantics as vlp_getFrame — page (default 1), maxElementsPerPage (default 200), include (\"sections\"/\"both\", default \"sections\"), roles, namedOnly, settle, waitMs (default 5000), quietMs (default 300); an unknown key inside frame is rejected with a tool error naming it, and nothing is dispatched. Unlike getFrame, settle defaults to true inside the fold — a folded map with no wait for quiescence would arrive mid-update and you would have to re-read anyway, defeating the point; pass frame:{settle:false} for an immediate, cheap read instead. roles/namedOnly are not a convenience trim: on a real form they are what makes page 1 of the folded map sufficient — without narrowing, you re-read regardless and the fold saves nothing. The fold only runs when the action itself succeeded (ok:true); with ok:false (stale/inert/disabled/a pending nativeDialog) the response is byte-identical to the unfolded one, with neither frame nor frameError, because nothing happened to read. On success the response gains exactly one of frame (the same payload vlp_getFrame would have returned for those parameters on that same DOM state) or frameError:{error} (the action completed but the map could not be read — re-read with getFrame, do not retry the action). That folded frame carries invalidElements/invalidCount/invalidProfile exactly as vlp_getFrame documents them: when action:\"click\" on a submit-like control returns ok:true and the site marks fields invalid as a consequence of the attempt, the invalid fields arrive already identified in this single response — no follow-up read is needed to locate them. If the control was disabled instead (ok:false, disabled:true), nothing was dispatched and there is no frame to fold: a separate vlp_getFrame call is still needed to read invalidElements in that case. With action:\"type\" and a fold, two independent settled verdicts coexist in the same response: the top-level settled still covers only the written field; frame.invalidation.settled is the document-wide temporal verdict — they can disagree (field settled, document still changing, or vice versa). Caveat: with frame the call also blocks while the map is read — worst case the action's own wait plus twice frame.waitMs (the second wait caps a navigation commit); for action:\"type\" that is act.waitMs + 2·frame.waitMs (defaults: 5000 + 10000 = 15 s), for click/focus/select it is 2·frame.waitMs (10 s default). Keep that total within your MCP client timeout budget.",
+		Name: "vlp_act", Description: "Execute an action (click/type/focus/select) on an element resolved by ref in a browser tab. For type and select the text parameter is value (a string, required; value:\"\" clears the field); unknown arguments (not declared in the input schema) (e.g. text instead of value) are rejected with a tool error naming them and nothing is dispatched. Returns {ok} plus, for action:\"type\" with ok:true, an observation of the written field: after a successful dispatch it waits for the field to settle (waitMs default 5000, quietMs default 300) and adds value (the field's text when resolved), settled (a TEMPORAL verdict — it does NOT affirm the site finished processing, and it covers only the field written, never derived values or the form's overall state), and waitedMs; if the element left the document during the wait, it returns detached:true with settled:false, without value. Before writing a number, determine the site's own numeric formatting convention (with the site's dedicated tool if one exists, or from the numbers the page already shows) and write the text in that convention; compare the number in value against the target value under that same convention. click/focus/select and every ok:false case (including type) are unaffected and, apart from the nativeDialog responses described below, return exactly {ok} or {ok:false, stale|error}, or, if the element is covered by an open modal dialog, {ok:false, inert:true, error}, or, if the target control is disabled (HTML :disabled, including inside <fieldset disabled>, nothing dispatched), {ok:false, disabled:true, error} — enable the control before retrying. force:true bypasses only the inert check, never disabled; forcing an action behind a real modal dialog can leave the app in an inconsistent state (use it only for dialogs misclassified as modal). While a full-page navigation is in flight (fb-018-006 amendment) the response also carries invalidation.navigating: true (present-only) and the action may land in the previous document. Caveat: with action:\"type\" the call may block until settled or waitMs elapses — keep waitMs within your MCP client timeout budget, as with getFrame's settle. nativeDialog:{type, message, pending:true} reports a native confirm/alert/prompt dialog opened by the page and waiting for a human. If a click opens one, the call returns early with ok:true and nativeDialog. If a native dialog is already pending in the tab, every action returns ok:false with nativeDialog and does not dispatch anything; force does not skip this check. Vulpo does not answer the dialog itself — tell the human, quoting message, and re-read with getFrame afterward. Only click detects a dialog: type, focus, and select whose own dispatch opens one may block the call instead. A dialog opened after the call has already returned is not detected. navigate and closeTab on that tab close a pending native dialog without a human answer (the page receives false/null); do not use them to get out of the question unless the human agrees. Optional frame (object, default absent): folds a vlp_getFrame read of the resulting map into this same call, so a caller who needs to see the screen after acting does not need a second MCP round trip. Presence is the opt-in switch — frame:{} requests the fold with defaults, there is no separate boolean. Accepted keys, same vocabulary and semantics as vlp_getFrame — page (default 1), maxElementsPerPage (default 200), include (\"sections\"/\"both\", default \"sections\"), roles, namedOnly, settle, waitMs (default 5000), quietMs (default 300); an unknown key inside frame is rejected with a tool error naming it, and nothing is dispatched. Unlike getFrame, settle defaults to true inside the fold — a folded map with no wait for quiescence would arrive mid-update and you would have to re-read anyway, defeating the point; pass frame:{settle:false} for an immediate, cheap read instead. roles/namedOnly are not a convenience trim: on a real form they are what makes page 1 of the folded map sufficient — without narrowing, you re-read regardless and the fold saves nothing. The fold only runs when the action itself succeeded (ok:true); with ok:false (stale/inert/disabled/a pending nativeDialog) the response is byte-identical to the unfolded one, with neither frame nor frameError, because nothing happened to read. On success the response gains exactly one of frame (the same payload vlp_getFrame would have returned for those parameters on that same DOM state) or frameError:{error} (the action completed but the map could not be read — re-read with getFrame, do not retry the action). That folded frame carries invalidElements/invalidCount/invalidProfile exactly as vlp_getFrame documents them: when action:\"click\" on a submit-like control returns ok:true and the site marks fields invalid as a consequence of the attempt, the invalid fields arrive already identified in this single response — no follow-up read is needed to locate them. If the control was disabled instead (ok:false, disabled:true), nothing was dispatched and there is no frame to fold: a separate vlp_getFrame call is still needed to read invalidElements in that case. With action:\"type\" and a fold, two independent settled verdicts coexist in the same response: the top-level settled still covers only the written field; frame.invalidation.settled is the document-wide temporal verdict — they can disagree (field settled, document still changing, or vice versa). Caveat: with frame the call also blocks while the map is read — worst case the action's own wait plus twice frame.waitMs (the second wait caps a navigation commit); for action:\"type\" that is act.waitMs + 2·frame.waitMs (defaults: 5000 + 10000 = 15 s), for click/focus/select it is 2·frame.waitMs (10 s default). Keep that total within your MCP client timeout budget. A numeric waitMs (top-level, or frame.waitMs inside the fold) above 60000 is rejected with a tool error before dispatch and nothing reaches the extension (at most 60000).",
 		InputSchema: map[string]any{
 			"type":       "object",
 			"properties": actProperties,
@@ -489,6 +526,12 @@ func RegisterAllTools(s *Server, hub Hub, helpFile string, odoo *odooregistry.Re
 		},
 		Handler: func(params map[string]any, token string) (any, error) {
 			if err := rejectUnknownArgs("act", params, actProperties); err != nil {
+				return nil, err
+			}
+			if err := checkDeclaredWaitMax("vlp_act", "waitMs", params["waitMs"]); err != nil {
+				return nil, err
+			}
+			if err := checkFrameDeclaredWait("vlp_act", params["frame"]); err != nil {
 				return nil, err
 			}
 			ref := strArg(params, "ref")

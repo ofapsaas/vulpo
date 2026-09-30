@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -361,8 +362,13 @@ func (h *Hub) Command(profileID string, cmd Command) (any, error) {
 	h.mu.Unlock()
 	h.send(p.WS, map[string]any{"type": "command", "command": cmd.Command, "params": cmd.Params, "id": id})
 
-	timer := time.NewTimer(idle + declaredWait(cmd))
+	wait := declaredWait(cmd)
+	timer := time.NewTimer(idle + wait)
 	defer func() { timer.Stop() }()
+	// D-3 (fb-024): el plazo informado es el que venció — idle + espera
+	// declarada al despachar, idle solo tras un latido (cada latido lo
+	// reinicia). `deadline` sigue al timer.
+	deadline := idle + wait
 	for {
 		select {
 		case v := <-resCh:
@@ -372,6 +378,7 @@ func (h *Hub) Command(profileID string, cmd Command) (any, error) {
 		case <-entry.heartbeat:
 			timer.Stop()
 			timer = time.NewTimer(idle) // cada latido reinicia el plazo
+			deadline = idle
 		case <-timer.C:
 			if !h.abandonPending(id) {
 				// La respuesta ganó la carrera contra el vencimiento: ya está en camino.
@@ -382,10 +389,26 @@ func (h *Hub) Command(profileID string, cmd Command) (any, error) {
 					return nil, e
 				}
 			}
-			return nil, fmt.Errorf("command_timeout: no answer or heartbeat from the extension for %s on tab %s within %d ms; the command may have been dispatched",
-				cmd.Command, cmd.TabID, idle.Milliseconds())
+			return nil, errors.New(timeoutMessage(cmd, deadline))
 		}
 	}
+}
+
+// timeoutMessage (fb-024 D-3/D-4): mensaje de vencimiento del hub. Informa el
+// plazo REAL que venció (idle + espera declarada; idle tras un latido) y, para
+// los comandos de PÁGINA (TabID no vacío, comando sin prefijo `odoo`), agrega al
+// final la pista del diálogo nativo — `type`/`fill`/`focus`/`select` pueden
+// dejar un confirm/alert/prompt esperando a un humano (fb-020-003 D-11). Los
+// `odoo*` conservan el texto byte-idéntico (I-2): su consejo lo agrega
+// odoo_tab_select. El prefijo `command_timeout:` y `the command may have been
+// dispatched` son el contrato estable (I-1).
+func timeoutMessage(cmd Command, deadline time.Duration) string {
+	msg := fmt.Sprintf("command_timeout: no answer or heartbeat from the extension for %s on tab %s within %d ms; the command may have been dispatched",
+		cmd.Command, cmd.TabID, deadline.Milliseconds())
+	if cmd.TabID != "" && !strings.HasPrefix(cmd.Command, "odoo") {
+		msg += fmt.Sprintf("; the page may be showing a native dialog (confirm/alert/prompt) waiting for a human in tab %s: ask the human to answer it, then re-read the page with vlp_getFrame before retrying (the action may have run); vlp_navigate and vlp_closeTab dismiss the dialog without an answer, use them only if the human agrees", cmd.TabID)
+	}
+	return msg
 }
 
 // abandonPending: borra pending[id] bajo el mutex; false si otro camino

@@ -72,22 +72,34 @@ restart.
 Odoo page itself sends a heartbeat every 15 s; if the page is reloaded, crashes
 or freezes, the heartbeats stop. Other tools send no heartbeat: they get the idle
 budget plus their own wait (`timeout` of `vlp_waitForElement`, `waitMs` of
-`vlp_getFrame`/`vlp_act`). If 45 s pass without an answer or a
-heartbeat, the server fails the call with `command_timeout: ... the command may
-have been dispatched` (in Odoo tools, `odoo_command_timeout:`; re-read before
-retrying a write). The 45 s idle budget is set on the server with
-`VLP_IDLE_BUDGET_MS` (milliseconds, default 45000). It has to outlast the
-15 s heartbeat plus the worst-case delay a browser adds when it throttles timers
-in a background tab, plus the 10 s an ORM call may spend waiting for an in-flight
-navigation before it runs (it sends nothing during that wait): **do not set it
-below 45 s**, or healthy calls on a backgrounded tab fail with
-`command_timeout`. Raising it is safe. There is no total limit
-while heartbeats keep arriving. `vlpmcp` gives up after
-`VLP_TIMEOUT` seconds (default 1800) with exit 8. Long
-operations (heavy Odoo actions, imports, `execute_kw` of processes) are allowed:
-they run as long as they need while the tab stays on the same page. A
-common cause is a native browser prompt (`confirm`/`alert`/`prompt`) waiting for
-a human in that tab: answer it in the browser.
+`vlp_getFrame`/`vlp_act`, `frame.waitMs` of `vlp_act`/`vlp_navigate`). A declared
+wait is capped at 60000 ms per parameter: a numeric `waitMs`, `frame.waitMs` or
+`timeout` above 60000 is rejected before dispatch with `<tool>: <param> must be at
+most 60000 ms (got <value>); nothing was dispatched`, and nothing reaches the
+extension — the server never truncates a wait on its own. If the idle budget
+passes without an answer or a heartbeat, the server fails the call with
+`command_timeout: ... for <tool> on tab <T> within <N> ms ... the command may
+have been dispatched`, where `<N>` is the deadline that actually expired (the
+idle budget plus the command's declared wait; the idle budget alone after a
+heartbeat); re-read before retrying a write. On page tools (`vlp_act`,
+`vlp_fill`, `vlp_click`, `vlp_getFrame`, `vlp_waitForElement`, `vlp_navigate`)
+the message ends with a hint: a native browser dialog (`confirm`/`alert`/`prompt`)
+may be open and waiting for a human in that tab — ask the human to answer it,
+then re-read with `vlp_getFrame` before retrying, because the action may have
+run; `vlp_navigate` and `vlp_closeTab` dismiss the dialog without an answer, so
+use them only if the human agrees. Odoo tools (`odoo*`) keep their
+`odoo_command_timeout` text and add no such hint. The 45 s idle budget is set on
+the server with `VLP_IDLE_BUDGET_MS` (milliseconds, default 45000). It has to
+outlast the 15 s heartbeat plus the worst-case delay a browser adds when it
+throttles timers in a background tab, plus the 10 s an ORM call may spend waiting
+for an in-flight navigation before it runs (it sends nothing during that wait):
+**do not set it below 45 s**, or healthy calls on a backgrounded tab fail with
+`command_timeout`. Raising it is safe. There is no total limit while heartbeats
+keep arriving. `vlpmcp` gives up after `VLP_TIMEOUT` seconds (default 1800) with
+exit 8. Long operations (heavy Odoo actions, imports, `execute_kw` of processes)
+are allowed: they run as long as they need while the tab stays on the same page.
+A common cause is a native browser prompt (`confirm`/`alert`/`prompt`) waiting
+for a human in that tab: answer it in the browser.
 
 **A call fails because the tab navigated.** After a click or a navigation, an Odoo
 ORM call waits for the page to load (up to 10 s) before it runs. Do not launch ORM
