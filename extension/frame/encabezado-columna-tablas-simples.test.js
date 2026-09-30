@@ -581,3 +581,447 @@ test('P7: cero claves nuevas aparte de column — orden canónico completo y cla
     );
   });
 });
+
+// ═══ P8 (Enmienda 1 del spec — E1.2/E1.4, RED parcial) ═══════════════════════
+
+// Agregados por la Enmienda 1 (2026-09-30) de fb-023-002: en una fila recién
+// agregada de una lista editable (inputs sin atributo `value`, sin texto) la
+// fila NO tiene nombre accesible; hoy las guardas `if (rc.length)` de las
+// cláusulas 0a/0b descartan la `column` de la celda de referencia y caen al
+// walk `group|region`, que devuelve `column: undefined` (V-3). La enmienda
+// (D-7/D-8, más D-6 reformulada) exige conservar la `column` de la celda de
+// referencia con `context` EXACTAMENTE como hoy (Invariantes I-6/I-7). GREEN
+// no renegocia estas decisiones.
+//
+// ── Naturaleza RED esperada (E1.4, verificada acá) ───────────────────────────
+//  · FALLAN por AssertionError, todos por la EMISIÓN de `column`:
+//      P8a (2) — input#cantidad / input#precio sobre F8 (0b sin fila);
+//      P8b (4) — las 2 td (0a) y los 2 inputs (0b) sobre F8-gc;
+//      P8c (2) — los 2 inputs sobre F8-reg (column, no el context);
+//      P8d (2) — los 2 inputs sobre F8-dlg (column, no el context);
+//      P8f (2) — el compañero RED: td e input de la tabla simple.
+//  · PIN / pasan por diseño ya en RED: guardas sin `context` de P8a/P8b,
+//    `context` exactos de P8c/P8d, P8e, la cruzada de P8f y P8g. Un rojo
+//    fuera de esas aserciones es defecto a reportar, no ruido del ciclo.
+//
+// Advertencia de fixture (misma cabecera del archivo): F8-dlg tiene un
+// `role=dialog` — con `elementFromPoint` inexistente en jsdom todo lo de
+// afuera sale `inert:true`; todo lo testeado acá está DENTRO del diálogo.
+//
+// I-3: fixtures sintéticos, sin nombres de cliente ni URLs (src/ es público).
+
+/** F8 (E1.2, verbatim): fila nueva — sin texto, inputs SIN atributo `value`
+ *  (con `value` la fila toma nombre y el caso degenera en P1). */
+const F8 =
+  '<main><table>' +
+  '<thead><tr>' +
+  '<th data-name="product_uom_qty"><span>Cantidad</span></th>' +
+  '<th data-name="price_unit"><span>Precio</span></th>' +
+  '</tr></thead>' +
+  '<tbody><tr>' +
+  '<td name="product_uom_qty"><input type="text" id="cantidad"></td>' +
+  '<td name="price_unit"><input type="text" id="precio"></td>' +
+  '</tr></tbody></table></main>';
+
+/** F8-gc (E1.2, variante): F8 con role="gridcell" en las dos celdas —
+ *  ejercita 0a (la celda misma) Y 0b (el control). */
+const F8_GC =
+  '<main><table>' +
+  '<thead><tr>' +
+  '<th data-name="product_uom_qty"><span>Cantidad</span></th>' +
+  '<th data-name="price_unit"><span>Precio</span></th>' +
+  '</tr></thead>' +
+  '<tbody><tr>' +
+  '<td name="product_uom_qty" role="gridcell"><input type="text" id="cantidad"></td>' +
+  '<td name="price_unit" role="gridcell"><input type="text" id="precio"></td>' +
+  '</tr></tbody></table></main>';
+
+/** F8-reg (E1.2, variante): F8 dentro de una región con nombre — el walk
+ *  `group|region` sigue aportando el `context` (D-7 no lo abandona). */
+const F8_REG = '<div role="region" aria-label="Líneas">' + F8 + '</div>';
+
+/** F8-dlg (E1.2, variante): F8 dentro de un diálogo activo — el nombre del
+ *  diálogo entra PRIMERO en `labels`, no se agrega la fila. */
+const F8_DLG = '<div role="dialog" aria-label="Agregar líneas">' + F8 + '</div>';
+
+/** F8e (E1.2 P8e): F8 SIN `data-name` en los `th` y SIN `name` en las `td`. */
+const F8E =
+  '<main><table>' +
+  '<thead><tr>' +
+  '<th><span>Cantidad</span></th>' +
+  '<th><span>Precio</span></th>' +
+  '</tr></thead>' +
+  '<tbody><tr>' +
+  '<td><input type="text" id="cantidad"></td>' +
+  '<td><input type="text" id="precio"></td>' +
+  '</tr></tbody></table></main>';
+
+/** F8f-cruzada (E1.2 P8f, verbatim): cruzada con cabeceras vacías (etiqueta
+ *  de columna sólo en `aria-label`; el colHeader posicional sale vacío y cae
+ *  al walk). */
+const F8F_CRUZADA =
+  '<main><table><thead><tr><th></th><th data-name="ene" aria-label="Enero"></th></tr></thead>' +
+  '<tbody><tr><th scope="row"></th><td name="ene" role="gridcell"><input id="v"></td></tr></tbody>' +
+  '</table></main>';
+
+/** F8f-simple (E1.2 P8f, compañero RED verbatim): la tabla SIMPLE con el
+ *  mismo par — la td y el input deben emitir column "Enero". */
+const F8F_SIMPLE =
+  '<main><table><thead><tr><th data-name="ene" aria-label="Enero"></th></tr></thead>' +
+  '<tbody><tr><td name="ene" role="gridcell"><input id="v"></td></tr></tbody>' +
+  '</table></main>';
+
+// ── P8a (cláusula 0b sin fila — RED 2 aserciones de column) ──────────────────
+
+test('P8a: fila sin nombre accesible — el input en celda emite la columna de su celda (0b sin fila, D-7)', async (t) => {
+  await t.test('P8a (guardas PIN): ambos inputs de F8 emitidos, name "" y SIN la clave context', () => {
+    const doc = makeDom(F8);
+    const root = doc.body;
+    const frame = serializeFrame(root, {});
+    for (const [id, etiqueta] of [
+      ['cantidad', 'input#cantidad'],
+      ['precio', 'input#precio'],
+    ]) {
+      const input = emitidoPara(frame, root, doc.getElementById(id), etiqueta + ' (F8)');
+      // Guarda de no-vacuidad (E1.2 P8a): con atributo `value` la fila tomaría
+      // nombre y el caso degeneraría en P1 — los inputs van recién agregados.
+      assert.equal(
+        input.name,
+        '',
+        'guarda de no-vacuidad (P8a): ' + etiqueta + ' con name "" — se ejercita la fila SIN nombre (inputs ' +
+          'vacíos, sin atributo value); Recibido ' + JSON.stringify(input),
+      );
+      assert.equal(
+        'context' in input,
+        false,
+        'guarda de no-vacuidad (P8a): ' + etiqueta + ' SIN la clave context — prueba que se ejercita la fila ' +
+          'sin nombre; D-7 no inventa un context de fila (labels vacío ⇒ context ausente). Recibido ' +
+          JSON.stringify(input),
+      );
+    }
+  });
+
+  await t.test('P8a (RED): input#cantidad (td product_uom_qty) emite column "Cantidad"', () => {
+    const doc = makeDom(F8);
+    const root = doc.body;
+    const frame = serializeFrame(root, {});
+    const input = emitidoPara(frame, root, doc.getElementById('cantidad'), 'input#cantidad (F8)');
+    assert.equal(
+      input.column,
+      'Cantidad',
+      'P8a (D-7, cláusula 0b sin fila): la celda de referencia es la misma que hoy y CONSERVA su `column` ' +
+        'aunque su rowCol esté vacío — column "Cantidad" (th[data-name="product_uom_qty"], emparejamiento por ' +
+        'campo técnico). HOY (RED): la guarda rc.length descarta la celda y cae al walk group|region ⇒ column ' +
+        'undefined (V-3). Recibido ' + JSON.stringify(input),
+    );
+  });
+
+  await t.test('P8a (RED): input#precio (td price_unit) emite column "Precio"', () => {
+    const doc = makeDom(F8);
+    const root = doc.body;
+    const frame = serializeFrame(root, {});
+    const input = emitidoPara(frame, root, doc.getElementById('precio'), 'input#precio (F8)');
+    assert.equal(
+      input.column,
+      'Precio',
+      'P8a (D-7, cláusula 0b sin fila): column "Precio" (th[data-name="price_unit"]) — sin esto, Cantidad y ' +
+        'Precio son indistinguibles en una fila recién agregada (V-3). HOY (RED): column undefined. Recibido ' +
+        JSON.stringify(input),
+    );
+  });
+});
+
+// ── P8b (cláusula 0a sin fila — RED 4 aserciones de column) ──────────────────
+
+test('P8b: celda cell-like SIN fila emite su columna (0a) y su control también (0b) — F8-gc, D-7', async (t) => {
+  await t.test('P8b (guardas PIN): las 2 celdas role="gridcell" y los 2 inputs de F8-gc están EMITIDOS, NINGUNO con la clave context', () => {
+    const doc = makeDom(F8_GC);
+    const root = doc.body;
+    const frame = serializeFrame(root, {});
+    const nodos = [
+      ['td product_uom_qty', doc.querySelector('td[name="product_uom_qty"]')],
+      ['td price_unit', doc.querySelector('td[name="price_unit"]')],
+      ['input#cantidad', doc.getElementById('cantidad')],
+      ['input#precio', doc.getElementById('precio')],
+    ];
+    for (const [etiqueta, nodo] of nodos) {
+      const el = emitidoPara(frame, root, nodo, etiqueta + ' (F8-gc)');
+      // Guarda de no-vacuidad (E1.2 P8b): emitidas — las td son candidatas
+      // por [role] (patrón P6c de contenido-asociado) y sin context (la fila
+      // no aporta nombre y D-7 no lo inventa).
+      assert.equal(
+        'context' in el,
+        false,
+        'guarda de no-vacuidad (P8b): ' + etiqueta + ' emitida y SIN la clave context (fila sin nombre; el walk ' +
+          'de caída no agrega fila). Recibido ' + JSON.stringify(el),
+      );
+    }
+  });
+
+  await t.test('P8b (RED): la td product_uom_qty (role="gridcell") emite column "Cantidad"', () => {
+    const doc = makeDom(F8_GC);
+    const root = doc.body;
+    const frame = serializeFrame(root, {});
+    const td = emitidoPara(frame, root, doc.querySelector('td[name="product_uom_qty"]'), 'td product_uom_qty (F8-gc)');
+    assert.equal(
+      td.column,
+      'Cantidad',
+      'P8b (D-7, cláusula 0a sin fila): la celda cell-like de F8-gc conserva su `column` aunque su rowCol esté ' +
+        'vacío — column "Cantidad" (th[data-name="product_uom_qty"]). HOY (RED): la guarda rc.length descarta ' +
+        'la celda ⇒ column undefined. Recibido ' + JSON.stringify(td),
+    );
+  });
+
+  await t.test('P8b (RED): la td price_unit (role="gridcell") emite column "Precio"', () => {
+    const doc = makeDom(F8_GC);
+    const root = doc.body;
+    const frame = serializeFrame(root, {});
+    const td = emitidoPara(frame, root, doc.querySelector('td[name="price_unit"]'), 'td price_unit (F8-gc)');
+    assert.equal(
+      td.column,
+      'Precio',
+      'P8b (D-7, cláusula 0a sin fila): column "Precio" (th[data-name="price_unit"]). HOY (RED): undefined. ' +
+        'Recibido ' + JSON.stringify(td),
+    );
+  });
+
+  await t.test('P8b (RED): input#cantidad de F8-gc emite column "Cantidad"', () => {
+    const doc = makeDom(F8_GC);
+    const root = doc.body;
+    const frame = serializeFrame(root, {});
+    const input = emitidoPara(frame, root, doc.getElementById('cantidad'), 'input#cantidad (F8-gc)');
+    assert.equal(
+      input.name,
+      '',
+      'guarda de no-vacuidad (P8b): el input no aporta texto propio (name "") — toda columna proviene de la celda ancestro',
+    );
+    assert.equal(
+      input.column,
+      'Cantidad',
+      'P8b (D-7, cláusula 0b sin fila): el control hereda la COLUMNA de su celda ancestro sin fila con nombre — ' +
+        'column "Cantidad". HOY (RED): column undefined. Recibido ' + JSON.stringify(input),
+    );
+  });
+
+  await t.test('P8b (RED): input#precio de F8-gc emite column "Precio"', () => {
+    const doc = makeDom(F8_GC);
+    const root = doc.body;
+    const frame = serializeFrame(root, {});
+    const input = emitidoPara(frame, root, doc.getElementById('precio'), 'input#precio (F8-gc)');
+    assert.equal(
+      input.name,
+      '',
+      'guarda de no-vacuidad (P8b): el input no aporta texto propio (name "")',
+    );
+    assert.equal(
+      input.column,
+      'Precio',
+      'P8b (D-7, cláusula 0b sin fila): el control hereda la COLUMNA de su celda ancestro — column "Precio". ' +
+        'HOY (RED): column undefined. Recibido ' + JSON.stringify(input),
+    );
+  });
+});
+
+// ── P8c (el walk sigue aportando context — PIN en context, RED en column) ────
+
+test('P8c: sobre F8-reg el walk group|region sigue danto el context ["Líneas"] (PIN) Y los inputs emiten column (RED, D-7)', async (t) => {
+  await t.test('P8c (PIN): cada input de F8-reg conserva context EXACTAMENTE ["Líneas"] — el walk sigue aportando', () => {
+    const doc = makeDom(F8_REG);
+    const root = doc.body;
+    const frame = serializeFrame(root, {});
+    for (const id of ['cantidad', 'precio']) {
+      const input = emitidoPara(frame, root, doc.getElementById(id), 'input#' + id + ' (F8-reg)');
+      assert.deepEqual(
+        input.context,
+        ['Líneas'],
+        'P8c (D-7, PIN): el context NO cambia — con fila sin nombre se sigue el walk group|region y labels es ' +
+          'exactamente ["Líneas"] (I-6: context intacto). Recibido ' + JSON.stringify(input),
+      );
+    }
+  });
+
+  await t.test('P8c (RED): input#cantidad de F8-reg emite column "Cantidad" además del context del walk', () => {
+    const doc = makeDom(F8_REG);
+    const root = doc.body;
+    const frame = serializeFrame(root, {});
+    const input = emitidoPara(frame, root, doc.getElementById('cantidad'), 'input#cantidad (F8-reg)');
+    assert.equal(
+      input.column,
+      'Cantidad',
+      'P8c (D-7): junto al context del walk ["Líneas"], la celda de 0b conserva su `column` — column "Cantidad". ' +
+        'HOY (RED): column undefined. Recibido ' + JSON.stringify(input),
+    );
+  });
+
+  await t.test('P8c (RED): input#precio de F8-reg emite column "Precio" además del context del walk', () => {
+    const doc = makeDom(F8_REG);
+    const root = doc.body;
+    const frame = serializeFrame(root, {});
+    const input = emitidoPara(frame, root, doc.getElementById('precio'), 'input#precio (F8-reg)');
+    assert.equal(
+      input.column,
+      'Precio',
+      'P8c (D-7): column "Precio" junto al context del walk — fila y columna conviven sin mover la huella ' +
+        '(I-6). HOY (RED): column undefined. Recibido ' + JSON.stringify(input),
+    );
+  });
+});
+
+// ── P8d (diálogo activo — PIN en context, RED en column) ─────────────────────
+
+test('P8d: sobre F8-dlg el nombre del diálogo activo entra primero (PIN) y los inputs emiten column (RED, D-7)', async (t) => {
+  await t.test('P8d (PIN): hay diálogo activo y cada input conserva context EXACTAMENTE ["Agregar líneas"] — el diálogo entra primero, no se agrega fila', () => {
+    const doc = makeDom(F8_DLG);
+    const root = doc.body;
+    const frame = serializeFrame(root, {});
+    // Precondición (patrón P4a del archivo): el role=dialog activa el diálogo.
+    assert.ok(frame.dialog, 'precondición (P8d): el role=dialog activa un diálogo');
+    // Advertencia inert (cabecera del archivo): lo testeado está DENTRO del
+    // diálogo, no afectado por el inert de afuera.
+    for (const id of ['cantidad', 'precio']) {
+      const input = emitidoPara(frame, root, doc.getElementById(id), 'input#' + id + ' (F8-dlg)');
+      assert.deepEqual(
+        input.context,
+        ['Agregar líneas'],
+        'P8d (D-7, PIN): el nombre del diálogo activo entra PRIMERO en labels y NO se agrega la fila — ' +
+          'context exactamente ["Agregar líneas"] (I-6: context intacto). Recibido ' + JSON.stringify(input),
+      );
+    }
+  });
+
+  await t.test('P8d (RED): input#cantidad de F8-dlg emite column "Cantidad" junto al context del diálogo', () => {
+    const doc = makeDom(F8_DLG);
+    const root = doc.body;
+    const frame = serializeFrame(root, {});
+    const input = emitidoPara(frame, root, doc.getElementById('cantidad'), 'input#cantidad (F8-dlg)');
+    assert.equal(
+      input.column,
+      'Cantidad',
+      'P8d (D-7): junto a context ["Agregar líneas"], la celda de 0b conserva su `column` "Cantidad". HOY (RED): ' +
+        'column undefined (V-3 en la rama de caída). Recibido ' + JSON.stringify(input),
+    );
+  });
+
+  await t.test('P8d (RED): input#precio de F8-dlg emite column "Precio" junto al context del diálogo', () => {
+    const doc = makeDom(F8_DLG);
+    const root = doc.body;
+    const frame = serializeFrame(root, {});
+    const input = emitidoPara(frame, root, doc.getElementById('precio'), 'input#precio (F8-dlg)');
+    assert.equal(
+      input.column,
+      'Precio',
+      'P8d (D-7): column "Precio" — Cantidad y Precio distinguibles también dentro del diálogo para una línea ' +
+        'nueva. HOY (RED): column undefined. Recibido ' + JSON.stringify(input),
+    );
+  });
+});
+
+// ── P8e (sin campo técnico — PIN pura; el compañero RED que evita el verde    //  vacuo es P8a) ──
+
+test('P8e: F8 sin campo técnico (sin data-name en th, sin name en td) — inputs emitidos SIN column y SIN context (PIN)', () => {
+  const doc = makeDom(F8E);
+  const root = doc.body;
+  const frame = serializeFrame(root, {});
+  for (const id of ['cantidad', 'precio']) {
+    const input = emitidoPara(frame, root, doc.getElementById(id), 'input#' + id + ' (F8e)');
+    // Guarda de no-vacuidad (E1.2 P8e): los inputs están EMITIDOS — sin la
+    // guarda, la ausencia de column sería verde vacua (el rojo que la evita
+    // es el compañero P8a).
+    assert.equal(
+      'column' in input,
+      false,
+      'P8e (D-7/D-1/D-3, PIN): SIN campo técnico no hay th[data-name] que emparejar ⇒ no hay columna que ' +
+        'conservar — la clave column NO se emite (present-only). Recibido ' + JSON.stringify(input),
+    );
+    assert.equal(
+      'context' in input,
+      false,
+      'P8e (D-7, PIN): sin campo técnico y sin nombre de fila, labels vacío ⇒ sin context (el walk no aporta nada ' +
+        'y D-7 no lo inventa). Recibido ' + JSON.stringify(input),
+    );
+  }
+});
+
+// ── P8f (D-2 intacto en la rama nueva — cruzada PIN, simple RED compañera) ───
+
+test('P8f: D-2 en la rama nueva — la cruzada con cabeceras vacías NO emite column (PIN); la simple con el mismo par SÍ (RED)', async (t) => {
+  await t.test('P8f (PIN): en la cruzada con cabeceras vacías, td[name="ene"] e input#v NO emiten column ni context', () => {
+    const doc = makeDom(F8F_CRUZADA);
+    const root = doc.body;
+    const frame = serializeFrame(root, {});
+    const nodos = [
+      ['td name="ene"', doc.querySelector('td[name="ene"]')],
+      ['input#v', doc.getElementById('v')],
+    ];
+    for (const [etiqueta, nodo] of nodos) {
+      const el = emitidoPara(frame, root, nodo, etiqueta + ' (F8f-cruzada)');
+      // Guarda de no-vacuidad (E1.2 P8f): ambos elementos están EMITIDOS.
+      assert.equal(
+        'column' in el,
+        false,
+        'P8f (D-2/I-7, PIN): en tabla CRUZADA la clave column NO se emite, tampoco por la rama de caída de la ' +
+          'enmienda (el colHeader posicional sale vacío y cae al walk). Recibido ' + JSON.stringify(el),
+      );
+      assert.equal(
+        'context' in el,
+        false,
+        'P8f (D-2, PIN): cabeceras vacías ⇒ labels vacío ⇒ sin context (el walk no fabrica etiquetas); la clave ' +
+          'column ausente es verde vacua sin el compañero RED de abajo (§ E1.4). Recibido ' + JSON.stringify(el),
+      );
+    }
+  });
+
+  await t.test('P8f (RED, compañero): la tabla simple con el mismo par emite column "Enero" en la td role="gridcell"', () => {
+    const doc = makeDom(F8F_SIMPLE);
+    const root = doc.body;
+    const frame = serializeFrame(root, {});
+    const td = emitidoPara(frame, root, doc.querySelector('td[name="ene"]'), 'td name="ene" (F8f-simple)');
+    assert.equal(
+      td.column,
+      'Enero',
+      'P8f (compañero RED): en tabla SIMPLE, la td role="gridcell" con td[name="ene"] ↔ th[data-name="ene"] ' +
+        '(etiqueta en aria-label) emite column "Enero" — sin el compañero, la ausencia en la cruzada sería ' +
+        'verde vacua. HOY (RED): column undefined. Recibido ' + JSON.stringify(td),
+    );
+  });
+
+  await t.test('P8f (RED, compañero): la tabla simple con el mismo par emite column "Enero" en el input', () => {
+    const doc = makeDom(F8F_SIMPLE);
+    const root = doc.body;
+    const frame = serializeFrame(root, {});
+    const input = emitidoPara(frame, root, doc.getElementById('v'), 'input#v (F8f-simple)');
+    assert.equal(
+      input.column,
+      'Enero',
+      'P8f (compañero RED, 0b sin fila): el control en celda hereda la COLUMNA "Enero" también para una etiqueta ' +
+        'que vive en aria-label. HOY (RED): column undefined. Recibido ' + JSON.stringify(input),
+    );
+  });
+});
+
+// ── P8g (orden D-6 reformulado — PIN verde-en-RED) ───────────────────────────
+
+test('P8g: sobre F8 y F8-gc, Object.keys de cada elemento es subsecuencia EN ORDEN de la lista canónica de D-6 (sin exigir adyacencia context→column)', () => {
+  for (const [nombre, html] of [
+    ['F8', F8],
+    ['F8-gc', F8_GC],
+  ]) {
+    const doc = makeDom(html);
+    const root = doc.body;
+    const frame = serializeFrame(root, {});
+    const elementos = allElements(frame);
+    // Guarda de no-vacuidad (E1.2 P8g): el frame emite elementos — sin ella
+    // el chequeo de orden sería verde vacuo.
+    assert.ok(elementos.length > 0, 'guarda de no-vacuidad (P8g): ' + nombre + ' emite elementos');
+    for (const el of elementos) {
+      assert.deepEqual(
+        Object.keys(el),
+        ORDEN_CANONICO_COMPLETO.filter((k) => k in el),
+        'P8g (D-6 reformulada): ' + nombre + ' ' + el.ref + ' — Object.keys subsecuencia EN ORDEN de la lista ' +
+          'canónica completa (column después de context SI está presente, siempre antes de options). Sin exigir ' +
+          'adyacencia context→column: un elemento puede llevar column sin context (D-7: context ausente con ' +
+          'labels vacío). Recibido ' + JSON.stringify(Object.keys(el)),
+      );
+    }
+  }
+});
