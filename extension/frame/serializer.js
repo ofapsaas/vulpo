@@ -433,9 +433,11 @@ function gridRowColContext(cell) {
 // (`maxContextEntries`) y de longitud por etiqueta (`maxContextLength`) son
 // del PAYLOAD, no del contenido — se aplican en `emitElement`, no acá, para
 // que la huella (que recibe Infinity) vea siempre el `context` completo (I-C).
-// fb-023-002 D-4 — devuelve `{ context, column }` (o `undefined`): `column`
-// sale de la MISMA celda cuyo `rowCol` ya aportaba `context` (cláusulas 0a/0b),
-// y el walk `group|region` devuelve `column: undefined`. Fuente única.
+// fb-023-002 D-4/D-7 — devuelve `{ context, column }` (o `undefined`): `column`
+// sale de la MISMA celda cuyo `rowCol` ya aportaba `context` (cláusulas 0a/0b) y
+// se conserva aunque esa celda no tenga nombre de fila (enmienda 1, D-7); el walk
+// `group|region` sólo aporta `context`. Resultado: `{ context: labels si no
+// vacío, column }`, o `undefined` si ambos están vacíos. Fuente única.
 function contextFor(el, root, activeDialog, dialogName) {
   const labels = [];
   // fb-023-002 enmienda 1 (D-7) — `column` de la CELDA DE REFERENCIA (0a: `el`
