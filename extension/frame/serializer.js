@@ -351,15 +351,38 @@ function closestGridRoot(el) {
   return null;
 }
 
+// fb-023-002 D-1/D-3/D-5 — etiqueta de COLUMNA de UNA celda de tabla simple:
+// empareja el campo técnico `name` de la celda con el `data-name` del `th` de
+// la fila de encabezado y devuelve su nombre accesible normalizado.
+// `undefined` si la celda no tiene `name`, si no hay `thead`, si ningún `th`
+// empareja, o si la etiqueta sale vacía (present-only). SIN fallback posicional
+// (D-1); no lee `colspan`/`rowspan` (D-5). Invocada SÓLO desde la rama simple
+// de `gridRowColContext` (D-2: en cruzadas `column` se omite).
+function gridColLabel(cell) {
+  const name = cell.getAttribute('name');
+  if (!name) return undefined;
+  const table = closestGridRoot(cell);
+  if (!table) return undefined;
+  const headRow = table.querySelector('thead tr');
+  if (!headRow) return undefined;
+  const th = Array.from(headRow.children).find(
+    (c) => c.tagName.toLowerCase() === 'th' && c.getAttribute('data-name') === name,
+  );
+  if (!th) return undefined;
+  return normalizeText(computeAccessibleName(th)) || undefined;
+}
+
 // fb-018-005 §2.2.2/§2.2.5 — etiqueta de fila/columna de UNA celda, con el
 // MISMO discriminante de cruce (§4.9.12) que usa `computeGridPromotions` para
-// decidir granularidad. Simple ⇒ [nombreDeFila]; cruzada ⇒ [encabezadoDeFila,
-// encabezadoDeColumna]. `undefined` si la celda no está dentro de ningún
-// subárbol table/grid/treegrid. Único punto de cómputo (enmienda 6, §2.3):
-// tanto `contextFor` (candidatos, cláusula 0) como `computeGridPromotions`
-// (celdas promovidas, vía `contextFor`) usan esta función, así que las dos
-// puertas de entrada nunca pueden calcular un `context` distinto para la
-// misma celda.
+// decidir granularidad. Devuelve `{ rowCol, column }` (fb-023-002 D-4): simple
+// ⇒ `rowCol = [nombreDeFila]` y `column` = etiqueta del th emparejado por campo
+// técnico; cruzada ⇒ `rowCol = [encabezadoDeFila, encabezadoDeColumna]` y
+// `column: undefined` (D-2, la columna ya viaja dentro de `context`).
+// `undefined` si la celda no está dentro de ningún subárbol table/grid/treegrid.
+// Único punto de cómputo (enmienda 6, §2.3): tanto `contextFor` (candidatos,
+// cláusula 0) como `computeGridPromotions` (celdas promovidas, vía `contextFor`)
+// usan esta función, así que las dos puertas de entrada nunca pueden calcular
+// un `context` distinto para la misma celda.
 function gridRowColContext(cell) {
   const table = closestGridRoot(cell);
   if (!table) return undefined;
@@ -385,11 +408,11 @@ function gridRowColContext(cell) {
     const rowHeader =
       rowHeaderEl && rowHeaderEl.tagName.toLowerCase() === 'th' ? normalizeText(rowHeaderEl.textContent) : null;
     const colHeader = headRow ? normalizeText((headRow.children[colIndex] || {}).textContent || '') : null;
-    return [rowHeader, colHeader];
+    return { rowCol: [rowHeader, colHeader], column: undefined };
   }
 
   const rowName = normalizeText(computeAccessibleName(tr));
-  return rowName ? [rowName] : undefined;
+  return { rowCol: rowName ? [rowName] : undefined, column: gridColLabel(cell) };
 }
 
 // fb-018-005 §2.5 — `context`: etiquetas de los grupos que contienen al
@@ -410,16 +433,20 @@ function gridRowColContext(cell) {
 // (`maxContextEntries`) y de longitud por etiqueta (`maxContextLength`) son
 // del PAYLOAD, no del contenido — se aplican en `emitElement`, no acá, para
 // que la huella (que recibe Infinity) vea siempre el `context` completo (I-C).
+// fb-023-002 D-4 — devuelve `{ context, column }` (o `undefined`): `column`
+// sale de la MISMA celda cuyo `rowCol` ya aportaba `context` (cláusulas 0a/0b),
+// y el walk `group|region` devuelve `column: undefined`. Fuente única.
 function contextFor(el, root, activeDialog, dialogName) {
   const labels = [];
   if (activeDialog && dialogName && containsAcrossShadow(activeDialog, el)) {
     labels.push(dialogName);
   }
   if (isCellLike(el)) {
-    const rowCol = (gridRowColContext(el) || []).filter(Boolean);
-    if (rowCol.length) {
-      labels.push(...rowCol);
-      return labels;
+    const { rowCol, column } = gridRowColContext(el) || {};
+    const rc = (rowCol || []).filter(Boolean);
+    if (rc.length) {
+      labels.push(...rc);
+      return { context: labels, column };
     }
   }
   // Cláusula 0b (fb-023-001, D-1..D-4): si `el` NO es cell-like (un control
@@ -440,10 +467,11 @@ function contextFor(el, root, activeDialog, dialogName) {
       let cur = el.parentElement;
       while (cur && cur !== root && cur !== grid) {
         if (isCellLike(cur)) {
-          const rowCol = (gridRowColContext(cur) || []).filter(Boolean);
-          if (rowCol.length) {
-            labels.push(...rowCol);
-            return labels;
+          const { rowCol, column } = gridRowColContext(cur) || {};
+          const rc = (rowCol || []).filter(Boolean);
+          if (rc.length) {
+            labels.push(...rc);
+            return { context: labels, column };
           }
           break; // D-4: ancestro más cercano sin contexto de fila ⇒ abandonar la rama
         }
@@ -463,7 +491,7 @@ function contextFor(el, root, activeDialog, dialogName) {
     }
     cur = cur.parentElement;
   }
-  return labels.length ? labels : undefined;
+  return labels.length ? { context: labels, column: undefined } : undefined;
 }
 
 // fb-018-005 §2.7, enmienda post-review (P20c) — cap de cardinalidad de un
@@ -529,6 +557,11 @@ function emitElement(c, limits) {
     const capped = capEntries(c.context, limits.contextEntries);
     out.context = capped.map((label) => truncateValue(label, limits.contextLength));
   }
+  // fb-023-002 D-3/D-6 — `column` es una clave escalar aparte (present-only),
+  // inmediatamente después de `context` y antes de `options`; se trunca con
+  // `contextLength` (mismo patrón que una etiqueta de `context`) y NO participa
+  // del cap de cardinalidad `contextEntries`.
+  if (c.column) out.column = truncateValue(c.column, limits.contextLength);
   if (c.options && c.options.length) out.options = capOptions(c.options, limits.options);
   if (c.value != null) out.value = truncateValue(c.value, limits.value);
   if (c.checked !== undefined) out.checked = c.checked;
@@ -752,6 +785,7 @@ function computeGridPromotions(ctx) {
       const vis = visibilityOf(cell, hasLayout, win);
       if (!vis.include) return null;
       const { name, textNodes } = joinedNameOf(cell);
+      const ctx = contextFor(cell, root, activeDialog, dialogName);
       return {
         ref: selectorPath(cell, root),
         role: getRole(cell) || '',
@@ -761,7 +795,8 @@ function computeGridPromotions(ctx) {
         disabled: disabledOf(cell, root),
         visible: vis.visible,
         inert: isInert(activeDialog, blocking, cell),
-        context: contextFor(cell, root, activeDialog, dialogName) || [],
+        context: ctx?.context ?? [],
+        column: ctx?.column,
         invalid: isInvalid(cell),
         ownValueTextNodes: textNodes,
         _gridTable: table,
@@ -1014,8 +1049,10 @@ export function serializeFrame(root, options) {
     }
 
     // fb-018-005 §2.5 — `context`: CRUDO y sin cap acá (P20c/§2.7); el recorte
-    // de cardinalidad/longitud se aplica en `emitElement`.
-    const context = contextFor(el, root, activeDialog, dialogName);
+    // de cardinalidad/longitud se aplica en `emitElement`. fb-023-002 D-3/D-4 —
+    // `column` llega del MISMO `contextFor` (fuente única), se guarda cruda y
+    // `emitElement` la trunca con `contextLength`.
+    const { context, column } = contextFor(el, root, activeDialog, dialogName) || {};
 
     children.push({
       ownValueTextNodes,
@@ -1028,6 +1065,7 @@ export function serializeFrame(root, options) {
       visible,
       inert: isInert(activeDialog, blocking, el),
       context,
+      column,
       options: selectOptions,
       value,
       checked: checkedOf(el, tag, role),
