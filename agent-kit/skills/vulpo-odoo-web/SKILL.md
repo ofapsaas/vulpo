@@ -88,7 +88,7 @@ needed.
   "tool": "vlp_act",
   "arguments": {
     "tabId": 7, "ref": "<Guardar/Save ref>", "action": "click",
-    "frame": {"roles": ["button", "textbox", "combobox"], "namedOnly": true}
+    "frame": {"roles": ["button", "textbox", "combobox"]}
   }
 }
 ```
@@ -368,15 +368,15 @@ Odoo forms are exactly the case the `act`/`navigate` `frame` fold targets:
 a real order/document view can carry far more than 200 candidate elements, so
 an unfiltered folded map's page 1 is unlikely to contain the next field you
 need — you would still have to re-read, which defeats the point of folding.
-Narrow every folded read with `roles`/`namedOnly` to the kind of element
-you are actually filling next, for example:
+For editable lists, omit `namedOnly`; narrow by known control roles instead.
+Blank-name inputs may still carry `column` and/or `context`, for example:
 
 ```json
 {
   "tool": "vlp_act",
   "arguments": {
     "tabId": 7, "ref": "main>form>div:2>input", "action": "type", "value": "Acme",
-    "frame": {"roles": ["textbox", "combobox"], "namedOnly": true, "maxElementsPerPage": 50}
+    "frame": {"roles": ["textbox", "combobox"], "maxElementsPerPage": 50}
   }
 }
 ```

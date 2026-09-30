@@ -84,15 +84,15 @@ Example (generic form, two fields to fill and inspect):
 ```
 # Old pattern — 4 calls for 2 interactions
 act {ref: nameField, action: "type", value: "Acme"}
-getFrame {roles: ["textbox"], namedOnly: true}
+getFrame {roles: ["textbox"]}
 act {ref: emailField, action: "type", value: "a@example.com"}
-getFrame {roles: ["textbox"], namedOnly: true}
+getFrame {roles: ["textbox"]}
 
 # New pattern — 2 calls for 2 interactions
 act {ref: nameField, action: "type", value: "Acme",
-     frame: {roles: ["textbox"], namedOnly: true}}
+     frame: {roles: ["textbox"]}}
 act {ref: emailField, action: "type", value: "a@example.com",
-     frame: {roles: ["textbox"], namedOnly: true}}
+     frame: {roles: ["textbox"]}}
 ```
 
 The fold only runs when the action itself succeeded (`ok:true` for `act`); on
@@ -124,13 +124,13 @@ The fold trades a bit of latency (see §5b/§2.3.1 of the tool description for
 the timeout budget) for one fewer round trip — use it when you were going to
 re-read anyway.
 
-**Narrow with `roles`/`namedOnly` on dense forms — same rule as §6, sharper
-inside a fold.** A folded map that returns unfiltered page 1 of a large form
-still forces a re-read to find the next ref, which defeats the whole point of
-folding. At the same time, §6's warning still applies inside the fold: a
-badly chosen filter can hide the very element you needed next, so narrow
-based on what you already know you are looking for (e.g. `roles:["textbox",
-"combobox"]` for a data-entry pass), not reflexively on every call.
+**Narrow with `roles` on dense forms, including folded reads.**
+For editable lists, omit `namedOnly`: blank-name controls can still carry
+`column` and/or `context`. Keep the roles of the controls you need; omit
+`roles` too if you do not know them. For text entry, use
+`roles:["textbox","combobox"]`. If the expected field is missing, re-read
+without either filter and inspect the pages reported by `totalPages`.
+Use the current map's refs; do not repeat the preceding action just to read.
 
 `vlp_click`/`vlp_fill` (legacy CSS-selector tools) do **not**
 support `frame` — see the `vulpo` skill for why and use `act` with `ref`
@@ -691,12 +691,12 @@ free.
 - **Old refs (format `tag:nth-of-type(N)`) still work.** If you have a cached map
   from before this feature, the refs it contains still resolve — no need to
   re-request the frame just for this.
-- **Optional filters, never by default:** `roles: [...]` (only elements of those
-  roles) and `namedOnly: true` (only elements with an accessible name). Use them
-  when you know beforehand what kind of element you are looking for — they shrink
-  the map without losing anything you asked for, but **do not use them "just in
-  case"**: a badly chosen filter can hide exactly the button you needed (see ⚠️
-  below).
+- **Optional filters, never by default:** `roles: [...]` keeps those roles;
+  `namedOnly: true` keeps only elements with a non-empty accessible name.
+  For editable lists, omit `namedOnly`, even when `column` or `context` is
+  present. Use those labels to identify blank-name controls and act by ref.
+  Labels do not guarantee a unique row: do not guess between ambiguous rows.
+  Narrow by known roles and inspect further pages; otherwise omit both filters.
 - **`invalidation.changedSinceLast` is now reliable across query changes.**
   Before, requesting different pages of the same frame without touching the DOM
   could give false "changed" positives (real bug, closed). Now you can change
