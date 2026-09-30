@@ -438,16 +438,23 @@ function gridRowColContext(cell) {
 // y el walk `group|region` devuelve `column: undefined`. Fuente única.
 function contextFor(el, root, activeDialog, dialogName) {
   const labels = [];
+  // fb-023-002 enmienda 1 (D-7) — `column` de la CELDA DE REFERENCIA (0a: `el`
+  // mismo; 0b: el ancestro cell-like más cercano), conservada aunque su `rowCol`
+  // esté vacío (fila sin nombre accesible). Sale SÓLO de esa celda: nunca de un
+  // ancestro más lejano ni del walk `group|region`. Si `labels` queda vacío y no
+  // hay `column`, el resultado sigue siendo `undefined` (comportamiento previo).
+  let column;
   if (activeDialog && dialogName && containsAcrossShadow(activeDialog, el)) {
     labels.push(dialogName);
   }
   if (isCellLike(el)) {
-    const { rowCol, column } = gridRowColContext(el) || {};
+    const { rowCol, column: cellColumn } = gridRowColContext(el) || {};
     const rc = (rowCol || []).filter(Boolean);
     if (rc.length) {
       labels.push(...rc);
-      return { context: labels, column };
+      return { context: labels, column: cellColumn };
     }
+    column = cellColumn; // D-7: fila sin nombre ⇒ abandonar la rama de fila, conservar `column`
   }
   // Cláusula 0b (fb-023-001, D-1..D-4): si `el` NO es cell-like (un control
   // dentro de una celda — el caso medido en campo 2026-09-25, donde los
@@ -467,12 +474,13 @@ function contextFor(el, root, activeDialog, dialogName) {
       let cur = el.parentElement;
       while (cur && cur !== root && cur !== grid) {
         if (isCellLike(cur)) {
-          const { rowCol, column } = gridRowColContext(cur) || {};
+          const { rowCol, column: cellColumn } = gridRowColContext(cur) || {};
           const rc = (rowCol || []).filter(Boolean);
           if (rc.length) {
             labels.push(...rc);
-            return { context: labels, column };
+            return { context: labels, column: cellColumn };
           }
+          column = cellColumn; // D-7: la celda de referencia conserva su `column` (fila sin nombre)
           break; // D-4: ancestro más cercano sin contexto de fila ⇒ abandonar la rama
         }
         cur = cur.parentElement;
@@ -491,7 +499,11 @@ function contextFor(el, root, activeDialog, dialogName) {
     }
     cur = cur.parentElement;
   }
-  return labels.length ? { context: labels, column: undefined } : undefined;
+  // D-7: `labels` vacío y sin `column` ⇒ `undefined` (igual que hoy);
+  // `labels` vacío con `column` ⇒ `{ context: undefined, column }` (en el mapa
+  // `context` queda ausente, present-only); `labels` no vacío ⇒ `{ context: labels, column }`.
+  if (labels.length) return { context: labels, column };
+  return column ? { context: undefined, column } : undefined;
 }
 
 // fb-018-005 §2.7, enmienda post-review (P20c) — cap de cardinalidad de un
