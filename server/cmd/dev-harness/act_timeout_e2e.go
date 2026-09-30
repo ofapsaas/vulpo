@@ -148,13 +148,16 @@ func runActTimeoutE2E(port int, pageURL string) bool {
 	wantWithin := fmt.Sprintf("for act on tab %s within %d ms", tabStr, expectedMs)
 
 	// Guarda de fixture: si el act NO bloqueó, vuelve ok:true — es fallo de
-	// fixture (D-11 no reproducido), no un RED por texto (spec §3.2 P7).
-	if answered && toolErr {
+	// fixture (D-11 no reproducido), no un RED por texto (spec §3.2 P7). Sólo
+	// un tool error con el prefijo `command_timeout:` cuenta como bloqueo por
+	// diálogo; cualquier otro tool error es fallo de fixture.
+	if answered && toolErr && strings.HasPrefix(msg, actTimeoutPrefix) {
 		allOK = paso("AT-fixture: act type bloqueado por el confirm (tool error, no ok:true)", true,
 			fmt.Sprintf(" (%d ms)", elapsed.Milliseconds())) && allOK
 	} else {
 		allOK = paso("AT-fixture: act type bloqueado por el confirm (tool error, no ok:true)", false,
-			fmt.Sprintf(" (respondió=%v, error de tool=%v, %d ms; msg=%.300q)", answered, toolErr, elapsed.Milliseconds(), msg)) && allOK
+			fmt.Sprintf(" (respondió=%v, error de tool=%v, prefijo=%v, %d ms; msg=%.300q)",
+				answered, toolErr, strings.HasPrefix(msg, actTimeoutPrefix), elapsed.Milliseconds(), msg)) && allOK
 	}
 
 	allOK = paso("AT-P7a: mensaje con prefijo command_timeout: y el plazo real idle+waitMs",

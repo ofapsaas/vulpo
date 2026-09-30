@@ -78,16 +78,16 @@ wait is capped at 60000 ms per parameter: a numeric `waitMs`, `frame.waitMs` or
 most 60000 ms (got <value>); nothing was dispatched`, and nothing reaches the
 extension — the server never truncates a wait on its own. If the idle budget
 passes without an answer or a heartbeat, the server fails the call with
-`command_timeout: ... for <tool> on tab <T> within <N> ms ... the command may
-have been dispatched`, where `<N>` is the deadline that actually expired (the
-idle budget plus the command's declared wait; the idle budget alone after a
-heartbeat); re-read before retrying a write. On page tools (`vlp_act`,
-`vlp_fill`, `vlp_click`, `vlp_getFrame`, `vlp_waitForElement`, `vlp_navigate`)
-the message ends with a hint: a native browser dialog (`confirm`/`alert`/`prompt`)
+`command_timeout: ... for <command> on tab <T> within <N> ms ... the command may
+have been dispatched` (for example `act`, `getFrame`), where `<N>` is the
+deadline that actually expired (the idle budget plus the command's declared
+wait; the idle budget alone after a heartbeat); re-read before retrying a write.
+Every command that acts on a tab ends the message with a hint: a native browser
+dialog (`confirm`/`alert`/`prompt`)
 may be open and waiting for a human in that tab — ask the human to answer it,
 then re-read with `vlp_getFrame` before retrying, because the action may have
 run; `vlp_navigate` and `vlp_closeTab` dismiss the dialog without an answer, so
-use them only if the human agrees. Odoo tools (`odoo*`) keep their
+use them only if the human agrees. `odoo*` tools keep their
 `odoo_command_timeout` text and add no such hint. The 45 s idle budget is set on
 the server with `VLP_IDLE_BUDGET_MS` (milliseconds, default 45000). It has to
 outlast the 15 s heartbeat plus the worst-case delay a browser adds when it
