@@ -169,8 +169,11 @@ func filepathWalk(root string, fn func(rel string, data []byte)) error {
 }
 
 // compareTree: cierre de set — ambos mapas deben tener exactamente el
-// mismo conjunto de rel-paths y los mismos SHA-256 (a menos que fuera
-// parte del set: harness-build.js, cuyo contenido P6 no exige).
+// mismo conjunto de rel-paths y los mismos SHA-256, salvo los marcados
+// presence-only (SHA ""): esos DEBEN estar presentes en la copia, pero
+// su contenido no se compara acá (el spec lo cubre por otro medio:
+// harness-build.js y manifest.json con injectBuild=true se verifican
+// por el bloque (a) con reflect.DeepEqual).
 func compareTree(t *testing.T, got, want map[string]string, ctx string) {
 	t.Helper()
 	for k := range got {
@@ -181,13 +184,14 @@ func compareTree(t *testing.T, got, want map[string]string, ctx string) {
 	for k, v := range want {
 		g, ok := got[k]
 		if !ok {
-			if v == "" { // marcador known-unknown (harness-build.js)
-				continue
+			// presence-only también exige presencia: si falta, falla.
+			if v == "" {
+				t.Fatalf("%s: presence-only falta en la copia: %q", ctx, k)
 			}
 			t.Fatalf("%s: falta en la copia: %q", ctx, k)
 			continue
 		}
-		if v == "" { // unknown sha (harness-build.js) — solo presencia
+		if v == "" { // presence-only (harness-build.js / manifest.json inyectado) — sin comparar contenido
 			continue
 		}
 		if g != v {
@@ -376,6 +380,10 @@ func TestPrepareHarnessExtension_InjectBuild(t *testing.T) {
 
 	// (c) cierre de set: exactamente los archivos del fixture (sin
 	//     node_modules) + harness-build.js; byte-idénticos los demás.
+	//     manifest.json va presence-only: con injectBuild=true su
+	//     contenido CAMBIA (P6 (a)) y ya está verificado arriba con
+	//     reflect.DeepEqual contra original + harness-build.js; el
+	//     cierre de SHA de (c) aplica al resto de los archivos.
 	gotTree := treeSHA(t, dstDir)
 	expectedTree := func() map[string]string {
 		m := map[string]string{}
@@ -383,6 +391,7 @@ func TestPrepareHarnessExtension_InjectBuild(t *testing.T) {
 			m[k] = v
 		}
 		m["harness-build.js"] = "" // presence-only
+		m["manifest.json"] = ""    // presence-only: contenido cubierto por (a)
 		return m
 	}()
 	noNodeModules(t, gotTree, "(c) injectBuild=true")
