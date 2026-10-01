@@ -34,6 +34,11 @@ const harnessBuildFileName = "harness-build.js"
 // harnessConfigFileName: nombre del script de configuración sólo-harness (D-2).
 const harnessConfigFileName = "harness-config.js"
 
+// harnessSignalFileName: nombre del script sólo-harness que apaga la
+// preferencia de la señal (fb-024 P11), inyectado sólo con
+// VLP_HARNESS_SIGNAL=off.
+const harnessSignalFileName = "harness-signal.js"
+
 // harnessTokensToken: token que escribe writeDevTokensFile. Es devToken salvo
 // en el selector de prueba P10 (VLP_HARNESS_BADTOKEN=1), que escribe un token
 // ajeno al harness para forzar el 401 del probe (D-5).
@@ -114,6 +119,57 @@ const harnessConfigJS = `// harness-config.js — fb-024-bootstrap-solo-dev (D-2
   });
 })();
 `
+
+// harnessSignalJS: script SÓLO del harness (fb-024 P11). Existe únicamente
+// dentro de la copia temporal cuando VLP_HARNESS_SIGNAL=off; nunca en el repo
+// ni en una XPI (I-2). Apaga la preferencia de la señal con la MISMA ruta que
+// el popup (storage.local, key `vlp_action_signal`), antes de cualquier acción
+// del harness. No toca ninguna otra clave.
+const harnessSignalJS = `// harness-signal.js — fb-024 P11 (harness-only).
+// Script SÓLO del harness: existe únicamente dentro de la copia temporal de la
+// extensión que arma cmd/dev-harness. Nunca en el repo ni en una XPI.
+(function () {
+  "use strict";
+  try {
+    browser.storage.local.set({ vlp_action_signal: false });
+  } catch (e) {
+    /* best-effort: si falla, la señal queda encendida y P11 falla, no pasa en falso */
+  }
+})();
+`
+
+// injectHarnessSignalOff: inyecta el apagado de la preferencia en la copia
+// (fb-024 P11). Agrega harnessSignalFileName como ÚLTIMO elemento de
+// background.scripts y escribe el archivo. Sólo existe en la copia temporal
+// (I-2). Se llama únicamente con VLP_HARNESS_SIGNAL=off.
+func injectHarnessSignalOff(dstDir string) error {
+	manifestPath := filepath.Join(dstDir, "manifest.json")
+	manifestBytes, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return fmt.Errorf("injectHarnessSignalOff: read manifest.json: %w", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(manifestBytes, &m); err != nil {
+		return fmt.Errorf("injectHarnessSignalOff: manifest.json: %w", err)
+	}
+	bg, ok := m["background"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("injectHarnessSignalOff: manifest.json: background missing")
+	}
+	scripts, ok := bg["scripts"].([]any)
+	if !ok {
+		return fmt.Errorf("injectHarnessSignalOff: manifest.json: background.scripts missing")
+	}
+	bg["scripts"] = append(scripts, harnessSignalFileName)
+	out, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(manifestPath, out, 0o644); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dstDir, harnessSignalFileName), []byte(harnessSignalJS), 0o644)
+}
 
 // injectHarnessConfig: inyecta la configuración del harness en la copia
 // (D-2). Agrega harnessConfigFileName como ÚLTIMO elemento de

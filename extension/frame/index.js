@@ -32,6 +32,9 @@ export function waitForSettle(doc, opts, serializeFn) {
 }
 // fb-020-002 v2 (§2.1): escritura + observación del campo escrito.
 export { performActionAndObserve, performFill } from './observe.js';
+// fb-024-senal-previa-accion (D-2): señal visual previa al despacho. Aditivo:
+// sin `durationMs` finito > 0 no cambia ningún comportamiento existente (D-7).
+export { signalAction } from './signal.js';
 // fb-020-003 v3.3 (§2.2, P24): lector de la pregunta nativa pendiente. El
 // envoltorio vive sólo en ../native-dialog-main.js.
 export { readNativeDialog } from './native-dialog.js';

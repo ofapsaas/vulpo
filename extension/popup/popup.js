@@ -12,6 +12,27 @@ const tabCount = document.getElementById('tabCount');
 const cmdCount = document.getElementById('cmdCount');
 const errCount = document.getElementById('errCount');
 const killSwitch = document.getElementById('killSwitch');
+const actionSignalToggle = document.getElementById('actionSignalToggle');
+
+// fb-024-senal-previa-accion (D-3): único escritor de la preferencia.
+// Ausente/true ⇒ encendida; false ⇒ apagada. Persiste en storage.local.
+const ACTION_SIGNAL_KEY = 'vlp_action_signal';
+
+async function loadActionSignalPref() {
+  if (!actionSignalToggle) return;
+  try {
+    const data = await browser.storage.local.get(ACTION_SIGNAL_KEY);
+    actionSignalToggle.checked = data[ACTION_SIGNAL_KEY] !== false;
+  } catch {
+    actionSignalToggle.checked = true;
+  }
+}
+
+if (actionSignalToggle) {
+  actionSignalToggle.addEventListener('change', async () => {
+    await browser.storage.local.set({ [ACTION_SIGNAL_KEY]: actionSignalToggle.checked });
+  });
+}
 
 // Versión dinámica desde el manifest (fuente única — nunca hardcodeada).
 const versionEl = document.querySelector('.version');
@@ -136,7 +157,10 @@ if (killSwitch) {
 }
 
 // Refresh on open
-document.addEventListener('DOMContentLoaded', refresh);
+document.addEventListener('DOMContentLoaded', () => {
+  loadActionSignalPref();
+  refresh();
+});
 
 // Auto-refresh every 3s
 setInterval(refresh, 3000);

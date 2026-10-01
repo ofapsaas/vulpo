@@ -149,3 +149,21 @@ vlpmcp call vlp_act '{"tabId":7,"ref":"main>form>div:1>input","action":"type","v
 `{ok:false, stale:true}` (old ref → read again) or `{ok:false, error}`.
 `getFrame` is read-only; `act` is gated by plan/build. `vlp_help` returns
 the full tool guide.
+
+## 4. Watching the agent act (action signal)
+
+Before each action that is actually going to run (`click`, `type`, `focus`,
+`select`, `fill`), the extension briefly marks the target on the page —
+concentric rings and a dot centered on the element — so a person watching can
+see where the agent is about to act.
+
+- It adds about **0.6 s per dispatched action**: the signal runs first, then the
+  action is dispatched. It does not change the tool's answer, does not appear in
+  the frame map, does not intercept clicks or typing, and leaves no page
+  mutations behind.
+- It is **on by default**. Turn it off (or back on) with the **"Señal antes de
+  cada acción"** checkbox in the extension popup; the choice is saved in the
+  extension's local storage and survives a Firefox restart.
+- If the tab is not visible, the signal is skipped: it would guide no one and
+  would only add latency. Actions that are rejected (disabled control, pending
+  native dialog, inert target, …) do not show it either.

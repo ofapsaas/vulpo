@@ -868,6 +868,85 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// ============================================================
+// fb-024-senal-previa-accion — señal visual previa al despacho
+// ============================================================
+// D-3: preferencia `vlp_action_signal` en storage.local. Ausente o `true` ⇒
+// encendida (600 ms); `false` ⇒ apagada. Sólo la escribe el popup. Se lee en
+// CADA act/fill, así un cambio vale para la acción siguiente sin recargar.
+const ACTION_SIGNAL_KEY = 'vlp_action_signal';
+const ACTION_SIGNAL_DEFAULT_MS = 600;
+
+async function actionSignalDurationMs() {
+  try {
+    const data = await browser.storage.local.get(ACTION_SIGNAL_KEY);
+    return data && data[ACTION_SIGNAL_KEY] === false ? 0 : ACTION_SIGNAL_DEFAULT_MS;
+  } catch {
+    // best-effort: si no se puede leer, la señal queda encendida (default).
+    return ACTION_SIGNAL_DEFAULT_MS;
+  }
+}
+
+// D-1: inyección de señal best-effort. Devuelve true SÓLO si la señal se
+// mostró (preferencia encendida + el bundle devolvió signaled:true). Nunca
+// lanza: un tab cerrado/navegado/error omite la espera y la acción sigue.
+async function injectActionSignalByRef(tabId, ref, action, value, force, durationMs) {
+  if (!(durationMs > 0)) return false;
+  try {
+    const results = await browser.scripting.executeScript({
+      target: { tabId },
+      func: (r, a, v, f, d) => {
+        if (!globalThis.VulpoFrame || typeof VulpoFrame.signalAction !== 'function') return false;
+        const el = VulpoFrame.resolveRef(r, document.body);
+        const res = VulpoFrame.signalAction(el, a, v, { force: !!f, durationMs: d });
+        return !!(res && res.signaled);
+      },
+      args: [ref, action, value ?? null, !!force, durationMs],
+    });
+    return results?.[0]?.result === true;
+  } catch {
+    return false;
+  }
+}
+
+// Igual que injectActionSignalByRef, para `fill`: el destino se resuelve por
+// selector (mismo camino que el handler `fill`), no por ref.
+async function injectActionSignalBySelector(tabId, selector, value, durationMs) {
+  if (!(durationMs > 0)) return false;
+  try {
+    const results = await browser.scripting.executeScript({
+      target: { tabId },
+      func: (sel, val, d) => {
+        if (!globalThis.VulpoFrame || typeof VulpoFrame.signalAction !== 'function') return false;
+        let el;
+        try {
+          el = document.querySelector(sel);
+        } catch {
+          return false;
+        }
+        if (!el) return false;
+        const res = VulpoFrame.signalAction(el, 'fill', val, { durationMs: d });
+        return !!(res && res.signaled);
+      },
+      args: [selector, value, durationMs],
+    });
+    return results?.[0]?.result === true;
+  } catch {
+    return false;
+  }
+}
+
+// D-1: `señal → espera de durationMs en background → camino actual`. La espera
+// NO se suma a la espera declarada del hub (D-4): ocurre fuera de toda
+// inyección vigilada. Si la señal no se mostró (acción rechazada o error), no
+// hay espera: el despacho actual decide igual.
+async function signalThenWait(inject) {
+  const durationMs = await actionSignalDurationMs();
+  if (!(durationMs > 0)) return;
+  const signaled = await inject(durationMs);
+  if (signaled) await delay(durationMs);
+}
+
 // Instala el envoltorio MAIN antes del despacho (§2.4.6). Devuelve el booleano
 // que devolvió la función MAIN (P25): `true` sólo si esta llamada quedó
 // registrada como ventana viva. Si la instalación lanza (CSP u otro) o
@@ -1567,6 +1646,9 @@ const handlers = {
       target: { tabId },
       files: ['frame-serializer.js'],
     });
+    // fb-024 D-1/D-3: señal + espera ANTES del camino actual de fill.
+    // Best-effort: si no se muestra, performFill decide igual.
+    await signalThenWait((d) => injectActionSignalBySelector(tabId, selector, value, d));
     const results = await browser.scripting.executeScript({
       target: { tabId },
       func: (sel, val) => {
@@ -1753,8 +1835,15 @@ const handlers = {
       ? performClickWithNativeDialogWatch(tabId, ref, value, force, waitMs, quietMs, command, declaredWaitMs)
       : performActInjection(tabId, ref, action, value, force, waitMs, quietMs, command, declaredWaitMs));
 
+    // fb-024 D-1/D-3: señal + espera ANTES del camino actual (antes del
+    // envoltorio del detector de diálogo en click, dentro de dispatchAct).
+    // Best-effort: si la señal no se muestra, la acción sigue igual.
+    const dispatchActWithSignal = (declaredWaitMs) => signalThenWait(
+      (d) => injectActionSignalByRef(tabId, ref, action, value, force, d),
+    ).then(() => dispatchAct(declaredWaitMs));
+
     // Sin `frame`: respuesta y timing vigentes, byte-idénticos (I-2).
-    if (!params.frame || !actWithFold) return dispatchAct(declaredWait(waitMs, 0));
+    if (!params.frame || !actWithFold) return dispatchActWithSignal(declaredWait(waitMs, 0));
 
     // fb-020-008 §2.3.2/P14: la espera declarada del pliegue es la SUMA de los
     // techos; el módulo la calcula y la declara ANTES de despachar, y el valor
@@ -1762,7 +1851,7 @@ const handlers = {
     let declaredMs = declaredWait(waitMs, 0);
     const result = await actWithFold({
       params,
-      performAction: () => dispatchAct(declaredMs),
+      performAction: () => dispatchActWithSignal(declaredMs),
       readFrame: (args) => readFrameForFold(args, command, declaredMs),
       lastFrameByTab,
       declareWait: (ms) => { declaredMs = ms; },

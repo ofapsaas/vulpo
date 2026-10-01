@@ -40,6 +40,10 @@
 //	                     extensión no queda configurada y el harness hace
 //	                     fail-fast con nombre antes de todo escenario (selector
 //	                     de prueba P6 de fb-024-bootstrap-solo-dev, D-4).
+//	VLP_HARNESS_SIGNAL=off inyecta harness-signal.js en la copia (nunca en el
+//	                     repo/XPI) y apaga `vlp_action_signal`: el runner corre
+//	                     P11 (fb-024-senal-previa-accion) en vez de P9/P10.
+//	                     Ausente ⇒ señal encendida (P9/P10).
 //
 // Nota: se usa web-ext (herramienta oficial de Mozilla) porque carga el addon
 // como TEMPORARY ADD-ON, que es el mecanismo que activa el service worker MV3.
@@ -737,9 +741,10 @@ func startTestPage() (string, func()) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		fmt.Fprint(w, st)
 	})
-	registerNavHangRoutes(mux)  // fb-020-007: /slowpage + /slowfetch
-	registerFoldRoutes(mux)     // fb-020-008: /fold-act
-	registerValidityRoutes(mux) // fb-020-005: /form-validez
+	registerNavHangRoutes(mux)      // fb-020-007: /slowpage + /slowfetch
+	registerFoldRoutes(mux)         // fb-020-008: /fold-act
+	registerValidityRoutes(mux)     // fb-020-005: /form-validez
+	registerActionSignalRoutes(mux) // fb-024: /action-signal
 	srv := &http.Server{Handler: mux}
 	go srv.Serve(ln)
 	return "http://" + ln.Addr().String() + "/", func() { srv.Close() }
@@ -2366,8 +2371,18 @@ func main() {
 				os.Exit(1)
 			}
 		}
+		// fb-024 P11: selector sólo-harness que apaga la preferencia de la
+		// señal en la COPIA (nunca en el repo/XPI).
+		signalOff := os.Getenv("VLP_HARNESS_SIGNAL") == "off"
+		if signalOff {
+			if err := injectHarnessSignalOff(dir); err != nil {
+				fmt.Printf("  [FAIL] injectHarnessSignalOff = %v\n", err)
+				cleanup()
+				os.Exit(1)
+			}
+		}
 		webExtSourceDir = dir
-		fmt.Printf("  [COPY] extension → %s (injectBuild=%v, injectConfig=%v)\n", dir, injectBuild, injectConfig)
+		fmt.Printf("  [COPY] extension → %s (injectBuild=%v, injectConfig=%v, signalOff=%v)\n", dir, injectBuild, injectConfig, signalOff)
 	}
 
 	// ---- PC1: arranca el server Go (binario como subproceso) ----
@@ -2557,10 +2572,14 @@ func main() {
 		// fb-020-005: validez de formulario en el mapa, perfil REAL de Odoo;
 		// tabs propios, corre último, aunque lo previo haya fallado.
 		valOK := connected && runFormValidityE2E(serverPort, testPageURL)
+		// fb-024-senal-previa-accion: P9/P10 (señal encendida) o P11
+		// (VLP_HARNESS_SIGNAL=off), tab propio; corre aunque lo previo haya
+		// fallado.
+		signalOK := connected && runActionSignalE2E(serverPort, testPageURL, os.Getenv("VLP_HARNESS_SIGNAL") == "off")
 		fmt.Println("\n=== RESULT ===")
 		cleanup()
-		if e2eOK && settleOK && typeOK && nativeOK && fieldCaseOK && navHangOK && foldOK && valOK {
-			fmt.Println("frame-e2e: PASS (E2E1-E2E7 invalidación + settle P10-P13/P15/P17/P18 + P19/P20 navegación en vuelo + type/fill P20-P23 fb-020-002 + native-dialog P10-P17 fb-020-003 + fill notFound/invalidSelector P13 + AC-2 fb-020-004 + llamada durante navegación P12/P13 fb-020-007 + pliegue act/navigate P23-live/P24/P25/P26/P28 fb-020-008 + validez de formulario en el mapa P15/P16/P21 fb-020-005)")
+		if e2eOK && settleOK && typeOK && nativeOK && fieldCaseOK && navHangOK && foldOK && valOK && signalOK {
+			fmt.Println("frame-e2e: PASS (E2E1-E2E7 invalidación + settle P10-P13/P15/P17/P18 + P19/P20 navegación en vuelo + type/fill P20-P23 fb-020-002 + native-dialog P10-P17 fb-020-003 + fill notFound/invalidSelector P13 + AC-2 fb-020-004 + llamada durante navegación P12/P13 fb-020-007 + pliegue act/navigate P23-live/P24/P25/P26/P28 fb-020-008 + validez de formulario en el mapa P15/P16/P21 fb-020-005 + señal previa P9/P10 fb-024-senal-previa-accion)")
 			os.Exit(0)
 		}
 		fmt.Println("frame-e2e: FAIL (alguna check E2E falló)")
