@@ -40,10 +40,32 @@
 //	                     extensión no queda configurada y el harness hace
 //	                     fail-fast con nombre antes de todo escenario (selector
 //	                     de prueba P6 de fb-024-bootstrap-solo-dev, D-4).
+//	VLP_HARNESS_NOTABS=1 arma la copia con harness-config.js cuyo dominio NO
+//	                     matchea la start-url: la extensión registra (S1) pero
+//	                     listTabs queda vacío y la barrera de PC2 vence
+//	                     (selector de prueba P4, D-4).
 //	VLP_HARNESS_SIGNAL=off inyecta harness-signal.js en la copia (nunca en el
 //	                     repo/XPI) y apaga `vlp_action_signal`: el runner corre
 //	                     P11 (fb-024-senal-previa-accion) en vez de P9/P10.
 //	                     Ausente ⇒ señal encendida (P9/P10).
+//
+// Diagnóstico de PC2 (fb-024-harness-pc2-diagnostico). Con la extensión
+// registrada, el gate FRAME_E2E espera el tab de la start-url en listTabs
+// (barrera D-1, T=30 s) ANTES de sondear Build; la sonda de Build sólo ve un
+// perfil ya listo. El fail-fast de PC2 nombra el estado OBSERVADO, nunca una
+// causa no observable (el console del background no es observable; discovery
+// §1.5). Las tres líneas posibles son:
+//   (a) VLP_HARNESS_NOCONFIG=1 → "extension not configured — ... omitted
+//       harness-config.js from the copy" (config omitida por selector).
+//   (b) registró el intento pero no hubo registro → "extension did not
+//       register within the PC2 timeout — ... likely the MV3 event page did
+//       not start ... otherwise harness-config.js failed" (causa candidata,
+//       sin afirmarla).
+//   (c) registró pero el tab de la start-url no apareció en listTabs dentro
+//       de T → "extension registered but the start-url tab did not appear in
+//       listTabs within 30s" (vence la barrera D-1, sin escenarios).
+// La línea (b) no distingue config rota de arranque MV3: no es observable con
+// los canales actuales (un beacon extensión→harness sería la vía; deuda Q1).
 //
 // Selectores de fb-024-settle-flaky-harness (barreras observables del bloque
 // settle; sólo-harness):
@@ -2620,6 +2642,15 @@ func main() {
 	// storage.sync no se usa en este gate (FF154 no lee la fila sembrada).
 	serverPort := 28700 + int(time.Now().Unix()%200)
 	rules := fmt.Sprintf("ws://127.0.0.1:%d %s 127.0.0.1", serverPort, devToken)
+	// D-4 (fb-024-harness-pc2-diagnostico): VLP_HARNESS_NOTABS=1 arma la copia
+	// con un dominio que NO matchea la start-url. connectFirst conecta el
+	// perfil igual (S1 sostenido), pero ningún tab entra a profile.tabs →
+	// vlp_listTabs devuelve [] y la barrera D-1 vence. Sólo-harness, sólo en
+	// la copia (I-2).
+	configRules := rules
+	if frameE2E && os.Getenv("VLP_HARNESS_NOTABS") == "1" {
+		configRules = fmt.Sprintf("ws://127.0.0.1:%d %s example.invalid", serverPort, devToken)
+	}
 	var closeTestPage func() = func() {}
 	startURL := odoourl
 	testPageURL := odoourl
@@ -2716,6 +2747,10 @@ func main() {
 	// Build sólo existe en la COPIA: harness-build.js no existe en el repo ni
 	// en la XPI (I-2). VLP_HARNESS_PLAN=1 arma la copia SIN inyectar (P7).
 	webExtSourceDir := extDir
+	// D-2/D-4: la config se inyecta en FRAME_E2E salvo VLP_HARNESS_NOCONFIG=1.
+	// Se declara ACÁ (fuera del bloque) para que el mensaje de no-registro de
+	// PC2 —más abajo— lea el valor real y elija la línea (a) vs (b).
+	injectConfig := true
 	if frameE2E {
 		base := os.Getenv("VLP_HARNESS_DIR")
 		dir, err := os.MkdirTemp(base, "vlp-harness-ext-")
@@ -2735,9 +2770,9 @@ func main() {
 		// también con VLP_HARNESS_PLAN=1 (independiente de la inyección de
 		// Build). VLP_HARNESS_NOCONFIG=1 arma la copia sin ella → el harness
 		// hace fail-fast con nombre (D-4 / P6).
-		injectConfig := os.Getenv("VLP_HARNESS_NOCONFIG") != "1"
+		injectConfig = os.Getenv("VLP_HARNESS_NOCONFIG") != "1"
 		if injectConfig {
-			if err := injectHarnessConfig(dir, rules); err != nil {
+			if err := injectHarnessConfig(dir, configRules); err != nil {
 				fmt.Printf("  [FAIL] injectHarnessConfig = %v\n", err)
 				cleanup()
 				os.Exit(1)
@@ -2797,7 +2832,7 @@ func main() {
 
 	// ---- PC2: lanza Firefox con extensión real vía web-ext ----
 	fmt.Println("\n[PC2] Lanza Firefox con extensión real vía web-ext")
-	fmt.Printf("  regla: %s\n", rules)
+	fmt.Printf("  regla: %s\n", configRules)
 	if frameE2E {
 		// fb-017-004: seed sqlite REMOVIDO en este gate — FF154 no lee la fila
 		// sembrada en storage-sync-v2.sqlite (y la descarta al primer
@@ -2862,14 +2897,14 @@ func main() {
 		return ok
 	}, 120*time.Second, "extensión conectada por WS (listTabs round-trip)")
 	close(touchDone)
-	// fb-024-bootstrap-solo-dev D-4: en un modo FRAME_E2E, si la extensión no
-	// registra con el server dentro del timeout de PC2 es una PRECONDICIÓN
-	// fallida: UNA línea de causa nombrada, exit ≠ 0, ANTES de todo escenario.
-	// Sustituye la antigua "desviación conocida — reintentar". El selector
-	// VLP_HARNESS_NOCONFIG=1 arma la copia sin harness-config.js para ejercitar
-	// este camino (P6); en P4 la línea no aparece.
+	// fb-024-bootstrap-solo-dev D-4 + fb-024-harness-pc2-diagnostico D-2: en un
+	// modo FRAME_E2E, si la extensión no registra con el server dentro del
+	// timeout de PC2 es una PRECONDICIÓN fallida: UNA línea, exit ≠ 0, ANTES de
+	// todo escenario. La línea la elige pc2NoRegistrationLine(injectConfig):
+	// (a) con VLP_HARNESS_NOCONFIG=1 nombra el selector; (b) con la config
+	// inyectada nombra el estado observado sin afirmar una causa no observable.
 	if frameE2E && !connected {
-		fmt.Println("  [FAIL] precondition: extension not configured (harness-config) — the extension did not register with the server within the PC2 timeout")
+		fmt.Println(pc2NoRegistrationLine(injectConfig))
 		cleanup()
 		os.Exit(1)
 	}
@@ -2881,6 +2916,20 @@ func main() {
 		paso("vlp_listTabs devuelve tabs reales", ok, fmt.Sprintf(" (%d tabs)", len(tabs)))
 	} else {
 		fmt.Println("  [NOTE] PC2 desviación documentada (MV3 no-determinista): no bloquea PC1/PC4/PC6.")
+	}
+
+	// fb-024-harness-pc2-diagnostico D-1: barrera observable del tab de la
+	// start-url. Con la extensión ya registrada, espera ese tab en listTabs
+	// ANTES de sondear Build: la carrera de asignación de URL ("about:blank" →
+	// URL real, que con carga excede una sonda única) ya no se atribuye a un
+	// "build probe error". Si vence, nombra el estado observado (registrada,
+	// sin el tab) y sale ≠ 0 antes de todo escenario (P4).
+	if frameE2E && connected {
+		if _, ok := waitForStartURLTab(serverPort, testPageURL, pc2StartURLTabTimeout); !ok {
+			fmt.Printf("  [FAIL] precondition: extension registered but the start-url tab did not appear in listTabs within %s\n", pc2StartURLTabTimeout)
+			cleanup()
+			os.Exit(1)
+		}
 	}
 
 	// fb-024 D-5: precondition fail-fast ANTES de cualquier escenario. Si el
