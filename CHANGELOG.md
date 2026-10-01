@@ -2,6 +2,23 @@
 
 All notable changes to Vulpo are documented here. Format: Keep a Changelog.
 
+## [Unreleased]
+
+### Changed
+
+- Tokens file parsing is now strict: a line with inner whitespace (for example,
+  the old `token label` shape) makes `vlpsrv` exit with code 1 and report the
+  offending line number — never the line's content. Files with one token per
+  line (the canonical format) are unaffected.
+
+### Fixed
+
+- `dev-harness` (`VLP_FRAME_E2E`) writes the canonical tokens file, probes the
+  build/plan state with the real tab id, and loads the extension from a
+  temporary copy with a harness-only background script, so the profile starts
+  in Build without changing the product. The script is never committed and is
+  not present in `src/extension/` or in the XPI.
+
 ## [0.5.3] — 2026-09-29
 
 ### Added

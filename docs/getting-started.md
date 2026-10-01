@@ -28,15 +28,18 @@ Environment variables (all have sensible defaults):
 | `VLP_BIND_ADDR` | `127.0.0.1` | Listener bind address (`0.0.0.0` for VPN/LAN). |
 | `VLP_TOKENS_FILE` | `~/.vulpo/tokens.txt` | Authorized tokens. |
 
-**Tokens file.** One token per line; comments with `#`:
+**Tokens file.** One token per line, no inner whitespace; comments with `#`;
+blank lines are ignored:
 
 ```text
 <token-1>
 <token-2>
 ```
 
-See `tokens.txt.example`. Keep the file at mode 0600. Without valid tokens, or
-with a malformed line, the server fails loudly (exit 1).
+See `tokens.txt.example`. Keep the file at mode 0600. An unreadable file, a
+file with no tokens, or a line with inner whitespace (for example, the old
+`token label` shape) makes the server exit with code 1 and report the offending
+line number — never the line's content.
 
 Generate a token with enough randomness, for example:
 

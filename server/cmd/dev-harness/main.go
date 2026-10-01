@@ -25,6 +25,16 @@
 //	VLP_FIREFOX       binario Firefox (default "firefox" del PATH; override para builds específicos)
 //	VLP_WEBEXT        binario web-ext (default ~/web-ext-tools/node_modules/.bin/web-ext)
 //
+// Selectores de fb-024-harness-headless (D-3/D-5):
+//
+//	VLP_HARNESS_PLAN=1   arma la copia de la extensión SIN inyectar
+//	                     harness-build.js → el perfil queda en Plan; el harness
+//	                     hace fail-fast (P7).
+//	VLP_HARNESS_DIR      base del directorio temporal de la copia de la
+//	                     extensión (default os.TempDir(); cleanup lo borra).
+//	VLP_HARNESS_BADTOKEN=1 escribe en el archivo de tokens un token ajeno al
+//	                     harness (selector de prueba P10: fuerza el fail-fast 401).
+//
 // Nota: se usa web-ext (herramienta oficial de Mozilla) porque carga el addon
 // como TEMPORARY ADD-ON, que es el mecanismo que activa el service worker MV3.
 // El launcher Camoufox (camoufox-with-addon.mjs) instala el addon manualmente
@@ -142,6 +152,24 @@ func mcpCall(port int, name string, args map[string]any) (string, bool) {
 	return text, true
 }
 
+// probeServerInitialize: probe de arranque del server + token del harness.
+// Devuelve el status HTTP y si la respuesta es un initialize válido.
+func probeServerInitialize(port int) (status int, ready bool) {
+	body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+	req, _ := http.NewRequest("POST", fmt.Sprintf("http://127.0.0.1:%d/mcp", port), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("x-vlp-token", devToken)
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, false
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, bytes.Contains(data, []byte(`"name":"vulpo"`))
+}
+
 func waitFor(fn func() bool, timeout time.Duration, step string) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -191,21 +219,66 @@ console.log('ok');
 
 func contains(s, sub string) bool { return len(sub) == 0 || bytes.Contains([]byte(s), []byte(sub)) }
 
-// ensureBuildMode: plan/build ya no es programático (fb-022: solo el usuario,
+// buildProbe: clasificación del probe de Build (fb-024 D-4).
+type buildProbe int
+
+const (
+	buildProbeBuild buildProbe = iota
+	buildProbePlan
+	buildProbeOther
+)
+
+// probeBuildMode: plan/build ya no es programático (fb-022: solo el usuario,
 // desde el popup de la extensión). Verifica el estado del perfil con un probe
-// write-class (vlp_eval sobre el primer tab): en Plan mode devuelve false y los
-// pasos write reportan la desviación con el error "blocked in Plan mode".
-func ensureBuildMode(port int) bool {
+// write-class (vlp_eval sobre el primer tab) y clasifica el resultado (D-4):
+// Build = sin error; Plan = el error contiene "blocked in Plan mode";
+// Other = cualquier otro error. Usa la clave `id` real de vlp_listTabs.
+func probeBuildMode(port int) (buildProbe, string) {
 	tabsText, ok := mcpCall(port, "vlp_listTabs", map[string]any{})
 	if !ok {
-		return false
+		return buildProbeOther, "vlp_listTabs failed"
 	}
 	var tabs []map[string]any
 	if err := json.Unmarshal([]byte(tabsText), &tabs); err != nil || len(tabs) == 0 {
-		return false
+		return buildProbeOther, "vlp_listTabs returned no tabs"
 	}
-	_, ok = mcpCall(port, "vlp_eval", map[string]any{"tabId": tabs[0]["tabId"], "code": "1"})
-	return ok
+	id, hasID := tabs[0]["id"]
+	if !hasID {
+		return buildProbeOther, "vlp_listTabs tab without id"
+	}
+	text, toolErr, answered := mcpCallEnvelope(port, "vlp_eval", map[string]any{"tabId": id, "code": "1"}, 30*time.Second)
+	if !answered {
+		return buildProbeOther, "vlp_eval: no answer: " + text
+	}
+	if contains(text, "blocked in Plan mode") {
+		return buildProbePlan, text
+	}
+	if toolErr {
+		return buildProbeOther, text
+	}
+	return buildProbeBuild, text
+}
+
+// ensureBuildMode: reintento del probe en medio de un escenario. Devuelve true
+// sólo si el perfil está en Build.
+func ensureBuildMode(port int) bool {
+	kind, _ := probeBuildMode(port)
+	return kind == buildProbeBuild
+}
+
+// buildPreconditionLine: fail-fast de fb-024 D-5 — clasifica el probe y, si el
+// perfil no está en Build, devuelve la ÚNICA línea de causa nombrada antes de
+// cualquier escenario. ok=true cuando el perfil está en Build.
+func buildPreconditionLine(port int) (bool, string) {
+	kind, detail := probeBuildMode(port)
+	switch kind {
+	case buildProbeBuild:
+		return true, ""
+	case buildProbePlan:
+		return false, "  [FAIL] precondition: profile in Plan mode — no WRITE_TOOL can run (vlp_eval: " + detail + ")"
+	default:
+		return false, "  [FAIL] precondition: build probe error: " + detail
+	}
 }
 
 // extractInt: extrae el primer entero del texto (id devuelto por create/import, etc.).
@@ -2114,7 +2187,16 @@ func main() {
 	os.RemoveAll(profileDir)
 	os.MkdirAll(profileDir, 0o755)
 	tokensFile := filepath.Join(repoRoot, ".devharness-tokens.txt")
-	os.WriteFile(tokensFile, []byte(devToken+" dev\n"), 0o600)
+	// D-1: único escritor del archivo de tokens (formato canónico). Selector
+	// P10 (VLP_HARNESS_BADTOKEN=1): escribe un token ajeno al harness devToken
+	// para forzar el fail-fast 401 del probe de PC1.
+	if os.Getenv("VLP_HARNESS_BADTOKEN") == "1" {
+		harnessTokensToken = "dev-harness-unregistered-token"
+	}
+	if err := writeDevTokensFile(tokensFile); err != nil {
+		fmt.Printf("  [FAIL] tokens file: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Gate FRAME_E2E: página de test + página bootstrap servidas por el propio
 	// harness (127.0.0.1:0, puerto efímero). No requiere Odoo. El start-url de
@@ -2143,6 +2225,7 @@ func main() {
 	var srvCmd *exec.Cmd
 	var webextCmd *exec.Cmd
 	webextLaunched := false
+	var harnessExtDir string // copia temporal de la extensión (D-3)
 	// cleanup: mata server + web-ext y borra archivos temporales. Se llama
 	// EXPLÍCITAMENTE antes de os.Exit (os.Exit NO ejecuta defers en Go).
 	cleanup := func() {
@@ -2156,6 +2239,12 @@ func main() {
 		closeTestPage()
 		os.RemoveAll(profileDir)
 		os.RemoveAll(tokensFile)
+		// D-3/P11: la copia temporal y el touch legacy (de corridas previas en
+		// las que el marker vivía en el source dir) no sobreviven.
+		if harnessExtDir != "" {
+			os.RemoveAll(harnessExtDir)
+		}
+		os.Remove(filepath.Join(extDir, ".harness-touch"))
 	}
 
 	// fb-018-006 (3.5 E2E): el gate FRAME_E2E reconstruye server + bundle
@@ -2175,6 +2264,29 @@ func main() {
 		}
 	}
 
+	// ---- D-3: copia de la extensión fuera del repo para el gate FRAME_E2E ----
+	// Build sólo existe en la COPIA: harness-build.js no existe en el repo ni
+	// en la XPI (I-2). VLP_HARNESS_PLAN=1 arma la copia SIN inyectar (P7).
+	webExtSourceDir := extDir
+	if frameE2E {
+		base := os.Getenv("VLP_HARNESS_DIR")
+		dir, err := os.MkdirTemp(base, "vlp-harness-ext-")
+		if err != nil {
+			fmt.Printf("  [FAIL] MkdirTemp(%q) = %v\n", base, err)
+			cleanup()
+			os.Exit(1)
+		}
+		harnessExtDir = dir
+		injectBuild := os.Getenv("VLP_HARNESS_PLAN") != "1"
+		if err := prepareHarnessExtension(extDir, dir, injectBuild); err != nil {
+			fmt.Printf("  [FAIL] prepareHarnessExtension = %v\n", err)
+			cleanup()
+			os.Exit(1)
+		}
+		webExtSourceDir = dir
+		fmt.Printf("  [COPY] extension → %s (injectBuild=%v)\n", dir, injectBuild)
+	}
+
 	// ---- PC1: arranca el server Go (binario como subproceso) ----
 	fmt.Println("\n[PC1] Arranca el server Go")
 	srvCmd = exec.Command(srvBin)
@@ -2189,20 +2301,28 @@ func main() {
 		cleanup()
 		os.Exit(1)
 	}
-	serverOK := waitFor(func() bool {
-		body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "initialize"})
-		req, _ := http.NewRequest("POST", fmt.Sprintf("http://127.0.0.1:%d/mcp", serverPort), bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Accept", "application/json")
-		req.Header.Set("x-vlp-token", devToken)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return false
+	// D-5 fail-fast: un 401 (el token del harness no está en el archivo de
+	// tokens) aborta de inmediato, antes de lanzar web-ext.
+	serverOK := false
+	probeDeadline := time.Now().Add(30 * time.Second)
+	lastStatus := 0
+	for time.Now().Before(probeDeadline) {
+		status, ready := probeServerInitialize(serverPort)
+		lastStatus = status
+		if ready {
+			serverOK = true
+			break
 		}
-		defer resp.Body.Close()
-		data, _ := io.ReadAll(resp.Body)
-		return bytes.Contains(data, []byte(`"name":"vulpo"`))
-	}, 30*time.Second, "server arranca (initialize responde)")
+		if status == http.StatusUnauthorized {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if !serverOK && lastStatus == http.StatusUnauthorized {
+		fmt.Printf("  [FAIL] precondition: 401 from the server — the harness token is not in the tokens file (VLP_TOKENS_FILE=%s)\n", tokensFile)
+		cleanup()
+		os.Exit(1)
+	}
 	allOK = allOK && paso("server arranca sin opencode (initialize serverInfo.name==vulpo)", serverOK, fmt.Sprintf(" (port %d)", serverPort))
 
 	// ---- PC2: lanza Firefox con extensión real vía web-ext ----
@@ -2227,7 +2347,7 @@ func main() {
 	// Se invoca con `node <web-ext.js>` explícito porque xvfb-run (sh -c) no
 	// resuelve el shebang del binario web-ext.
 	webextCmd = exec.Command("xvfb-run", "-a", "node", webextBin, "run",
-		"--source-dir", extDir,
+		"--source-dir", webExtSourceDir,
 		"--firefox", firefoxBin,
 		"--keep-profile-changes",
 		"--firefox-profile", profileDir,
@@ -2247,9 +2367,10 @@ func main() {
 	// MEJOR ESFUERZO (desviación documentada en spec §2 PC2): el event page MV3
 	// arranca no-determinísticamente tras la instalación temporal (ADR-005).
 	// Mitigación: sin --no-reload, un touch-loop toca un archivo marker dentro
-	// de extDir cada ~8s → web-ext recarga el addon (nueva instalación temporal)
-	// → nueva oportunidad de arranque del event page. Timeout total 120s.
-	touchFile := filepath.Join(extDir, ".harness-touch")
+	// del source dir (la copia del harness en FRAME_E2E) cada ~8s → web-ext
+	// recarga el addon (nueva instalación temporal) → nueva oportunidad de
+	// arranque del event page. Timeout total 120s.
+	touchFile := filepath.Join(webExtSourceDir, ".harness-touch")
 	if f, err := os.OpenFile(touchFile, os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
 		f.Close()
 	}
@@ -2279,6 +2400,18 @@ func main() {
 		paso("vlp_listTabs devuelve tabs reales", ok, fmt.Sprintf(" (%d tabs)", len(tabs)))
 	} else {
 		fmt.Println("  [NOTE] PC2 desviación documentada (MV3 no-determinista): no bloquea PC1/PC4/PC6.")
+	}
+
+	// fb-024 D-5: precondition fail-fast ANTES de cualquier escenario. Si el
+	// perfil no está en Build (Plan por falta de inyección, u otro error del
+	// probe) sale con UNA línea de causa nombrada; sustituye la cascada de
+	// `*-pre: toggle build`.
+	if frameE2E && connected {
+		if ok, line := buildPreconditionLine(serverPort); !ok {
+			fmt.Println(line)
+			cleanup()
+			os.Exit(1)
+		}
 	}
 
 	// ---- Gate FRAME_E2E (fb-017-004 + fb-018-006): E2E de invalidación y de

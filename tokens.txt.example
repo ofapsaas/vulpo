@@ -1,6 +1,6 @@
-# Vulpo Tokens
-# Un token por línea. Comentarios con #.
-# Configurar VLP_TOKENS_FILE en el entorno del service.
-# Copiar a ~/.vulpo/tokens.txt
+# Vulpo tokens
+# One token per line, no inner whitespace. Comments start with #.
+# Set VLP_TOKENS_FILE in the service environment.
+# Copy to ~/.vulpo/tokens.txt
 
 YOUR_TOKEN_HERE

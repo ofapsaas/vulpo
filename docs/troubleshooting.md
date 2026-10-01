@@ -63,9 +63,10 @@ first. Use one token per browser.
 `systemctl --user restart vlpsrv.service` (this drops every
 session; clients recover automatically).
 
-**The server does not start after adding a token.** Every line of the tokens file
-needs a label (`token label`); a line without one makes the server exit with
-code 1. Restore the backup made by `onboard-agent.sh` or fix the line, then
+**The server does not start after adding a token.** A line with inner
+whitespace (for example, the old `token label` shape) makes the server exit
+with code 1, and the message names the offending line number. Leave only the
+token on the line, or restore the backup made by `onboard-agent.sh`, then
 restart.
 
 **A tool hangs.** While an Odoo call (or the Odoo session probe) is running, the

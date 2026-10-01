@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/gorilla/websocket"
 
@@ -409,6 +410,9 @@ func newUUID() string {
 }
 
 // ParseTokensFile: un token por línea, comentarios `#`, sin vacíos.
+// Estricto (fb-024 D-2): una línea recortada con cualquier espacio interno
+// (unicode.IsSpace) es un error que nombra `line <N>` (N cuenta TODAS las
+// líneas del archivo) y NUNCA revela el contenido de la línea (I-4).
 // Ilegible → error (fail-loud en el CLI).
 func ParseTokensFile(filePath string) ([]string, error) {
 	raw, err := os.ReadFile(filePath)
@@ -416,10 +420,13 @@ func ParseTokensFile(filePath string) ([]string, error) {
 		return nil, err
 	}
 	var tokens []string
-	for _, line := range strings.Split(string(raw), "\n") {
+	for i, line := range strings.Split(string(raw), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
+		}
+		if strings.ContainsFunc(line, unicode.IsSpace) {
+			return nil, fmt.Errorf("tokens file line %d: expected a single token without inner whitespace", i+1)
 		}
 		tokens = append(tokens, line)
 	}
