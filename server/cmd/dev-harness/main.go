@@ -1404,7 +1404,10 @@ func runSettleE2E(port int, pageURL string) bool {
 	preLoop, preLoopOK := readSettleStatus(pageURL)
 	loopOn := triggerMutate(pageURL, "loop-on")
 	loopReady := loopOn && waitForLoopState(pageURL, "on", 5*time.Second)
-	appliedReady := loopReady && waitForApplied(pageURL, preLoop.Applied+2, 5*time.Second)
+	// F-4: el umbral depende de la lectura previa — si preLoop falló, Applied=0
+	// y el umbral quedaría absoluto (≥2), casi satisfecho por historia previa
+	// en un doc ya mutado. Se propaga preLoopOK (simétrico con E2E3/P15).
+	appliedReady := loopReady && preLoopOK && waitForApplied(pageURL, preLoop.Applied+2, 5*time.Second)
 	if !appliedReady {
 		fmt.Printf("  [FAIL] P11-false-pre: timeout de waitForApplied(applied≥%d) — el loop no aplicó 2 ticks (preLoop ok=%v applied=%d)\n",
 			preLoop.Applied+2, preLoopOK, preLoop.Applied)
@@ -1482,8 +1485,15 @@ func runSettleE2E(port int, pageURL string) bool {
 	// antes de navegar y se espera el cambio antes de la lectura de reset (la
 	// espera fija de 1500 ms no probaba que el documento fresco ya había
 	// cargado).
-	preNav, _ := readSettleStatus(pageURL)
+	// F-3: el error de la lectura NO se descarta. Si falla, prevDoc queda ""
+	// y waitForDocChange("") devolvería true en la primera lectura exitosa sin
+	// haber navegado (barrera en vacío, contra I-5). preNavOK entra a la
+	// aserción del paso, de modo que el path de error FALLA nombrado.
+	preNav, preNavOK := readSettleStatus(pageURL)
 	prevDoc := preNav.Doc
+	if !preNavOK {
+		fmt.Println("  [FAIL] P15-pre: no se pudo leer prevDoc (lectura de estado fallida antes de navegar)")
+	}
 	_, navOK := mcpCall(port, "vlp_navigate", map[string]any{"tabId": tabID, "url": pageURL + "?p15=1"})
 	docChanged := waitForDocChange(pageURL, prevDoc, 10*time.Second)
 	if !docChanged {
@@ -1517,9 +1527,9 @@ func runSettleE2E(port int, pageURL string) bool {
 	m7c, ok7c, _ := getFrameMap(port, map[string]any{"tabId": tabID})
 	changed7c := invChanged(m7c)
 	allOK = paso("P15: changedSinceLast intacto — reset(navegación)=true, mutación real=true, repetida=false",
-		p15Build && navOK && docChanged && ok7a && changed7a && mutOK7 && applied7 && ok7b && changed7b && ok7c && !changed7c,
-		fmt.Sprintf(" (build=%v nav=%v docChanged=%v, reset changed=%v, mutación=%v waitForApplied=%v changed=%v, repetida changed=%v)",
-			p15Build, navOK, docChanged, changed7a, mutOK7, applied7, changed7b, changed7c)) && allOK
+		p15Build && navOK && preNavOK && docChanged && ok7a && changed7a && mutOK7 && applied7 && ok7b && changed7b && ok7c && !changed7c,
+		fmt.Sprintf(" (build=%v nav=%v preNavOK=%v docChanged=%v, reset changed=%v, mutación=%v waitForApplied=%v changed=%v, repetida changed=%v)",
+			p15Build, navOK, preNavOK, docChanged, changed7a, mutOK7, applied7, changed7b, changed7c)) && allOK
 
 	// SET-8 (P18) — error path intacto: getFrame con settle sobre tab
 	// inexistente ⇒ el MISMO error que el plain (la espera no introduce una
@@ -1627,7 +1637,14 @@ func runSettleE2E(port int, pageURL string) bool {
 // estado de un documento distinto al que el paso mide. Mantiene el tab que
 // findTabByURL resuelve (el que usan los pasos) y cierra los duplicados.
 func closeDuplicateTestPageTabs(port int, pageURL string) {
-	keep, _ := findTabByURL(port, pageURL, 5*time.Second)
+	// F-7: el ok de findTabByURL se propaga. Sin él, keep=0 nunca coincide y se
+	// cerrarían TODOS los tabs con URL==pageURL, incluido el fixture real: FAIL
+	// espurio en SET-pre. Early-fail nombrado en su lugar.
+	keep, keepOK := findTabByURL(port, pageURL, 5*time.Second)
+	if !keepOK {
+		fmt.Println("  [FAIL] SET-pre: findTabByURL no resolvió el tab del fixture — no se cierran duplicados")
+		return
+	}
 	txt, ok := mcpCall(port, "vlp_listTabs", map[string]any{})
 	if !ok {
 		return
@@ -1682,10 +1699,56 @@ func reloadTestFixture(port int, pageURL string) bool {
 	return waitForDocChange(pageURL, prev.Doc, 15*time.Second)
 }
 
+// runSettleE2ECaptured (F-2): corre runSettleE2E capturando su salida para
+// clasificar la causa de un fallo de iteración. Re-emite la salida tal cual
+// (sin alterar el log) para que los [FAIL] de la iteración queden visibles.
+// El bloque settle corre en un único goroutine, así que redirigir os.Stdout
+// durante la llamada no interfiere con otros escritores.
+func runSettleE2ECaptured(port int, pageURL string) (bool, string) {
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		return runSettleE2E(port, pageURL), ""
+	}
+	os.Stdout = w
+	done := make(chan string, 1)
+	go func() {
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, r)
+		done <- buf.String()
+	}()
+	ok := runSettleE2E(port, pageURL)
+	_ = w.Close()
+	os.Stdout = old
+	out := <-done
+	fmt.Print(out)
+	return ok, out
+}
+
+// hasSettleStepFailure (F-2/D-7): true si la salida de una iteración contiene
+// algún [FAIL] que NO sea de precondición (`*-pre:`). Un fallo cuyo único
+// origen es la preparación/readiness (clase PC2) NO es un fallo de settle: la
+// iteración es inválida y no cuenta. Imprime, al clasificar, todos los [FAIL]
+// observados (re-emitidos por runSettleE2ECaptured) para que la clasificación
+// sea auditable.
+func hasSettleStepFailure(out string) bool {
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.Contains(line, "[FAIL]") {
+			continue
+		}
+		if !strings.Contains(line, "-pre:") {
+			return true
+		}
+	}
+	return false
+}
+
 // runSettleRepeat (fb-024 D-7): corre el bloque settle N veces, cada una sobre
 // un documento fresco; imprime por iteración el resultado y la carga 1-min
-// (/proc/loadavg). Una iteración que no logra preparar el documento fresco
-// (clase PC2) es INVÁLIDA: se informa como tal y no cuenta como fallo.
+// (/proc/loadavg). Una iteración INVÁLIDA (clase PC2) es la que no logra
+// preparar el documento fresco o cuya falla no contiene ningún [FAIL] de paso
+// settle (sólo precondición/readiness): se informa como tal y no cuenta como
+// fallo de settle.
 func runSettleRepeat(port int, pageURL string, n int) bool {
 	fmt.Printf("\n[E2E-settle-repeat] VLP_SETTLE_REPEAT=%d — bloque settle × %d sobre documento fresco\n", n, n)
 	allOK := true
@@ -1702,7 +1765,15 @@ func runSettleRepeat(port int, pageURL string, n int) bool {
 			time.Sleep(2 * time.Second)
 			continue
 		}
-		ok := runSettleE2E(port, pageURL)
+		ok, out := runSettleE2ECaptured(port, pageURL)
+		// F-2: clasificar por causa. Sin ningún [FAIL] de paso settle, el
+		// fallo es de preparación/readiness (PC2) y no cuenta.
+		if !ok && !hasSettleStepFailure(out) {
+			invalid++
+			fmt.Printf("  [REPEAT] iteración inválida (causa PC2/readiness) load1=%s — no cuenta\n", load)
+			time.Sleep(2 * time.Second)
+			continue
+		}
 		valid++
 		fmt.Printf("  [REPEAT] iteración %d/%d load1=%s resultado=%v\n", valid, n, load, ok)
 		allOK = allOK && ok

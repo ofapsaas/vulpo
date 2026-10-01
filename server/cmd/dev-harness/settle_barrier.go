@@ -20,12 +20,18 @@ import (
 // del fixture (150 ms) para acotar el retardo de detección sin martillar.
 const settlePollInterval = 50 * time.Millisecond
 
+// settleHTTPClient (F-5): transporte compartido por las barreras con timeout
+// propio. Sin él, un GET colgado (localhost, server propio) bloquearía la
+// barrera más allá de su deadline — el "false honesto al vencer" (I-5) asume
+// transportes que fallan rápido. Acotado al permiso de la barrera.
+var settleHTTPClient = &http.Client{Timeout: 1 * time.Second}
+
 // readSettleStatus: lee /settle-status del fixture y lo parsea a settleReport.
 // ok=false si el GET falla o el cuerpo no parsea (las barreras no confunden un
 // fallo de transporte con una condición cumplida).
 func readSettleStatus(pageURL string) (settleReport, bool) {
 	var rep settleReport
-	resp, err := http.Get(strings.TrimSuffix(pageURL, "/") + "/settle-status")
+	resp, err := settleHTTPClient.Get(strings.TrimSuffix(pageURL, "/") + "/settle-status")
 	if err != nil {
 		return rep, false
 	}
