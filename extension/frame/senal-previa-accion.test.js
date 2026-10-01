@@ -188,12 +188,23 @@ async function escenarioP2(apiFns, { html, id, accion, valor, esFill = false, co
   await sleep(600); // cota inferior: la ventana de señal completa antes de despachar (D-1)
 
   let t0 = 0;
+  let registrosNodoExtra = 0;
   const descarta = () => {
     if (t0 === 0) {
       t0 = performance.now();
       if (conNodoExtra) {
         // Guarda anti-vacuidad: mutación de la PÁGINA (no de la señal) a t0+500.
-        setTimeout(() => doc.body.appendChild(doc.createElement('div')), 500);
+        // takeRecords() en el MISMO tick de la mutación: en jsdom los records
+        // se entregan al callback del observer en la microtask siguiente, y un
+        // takeRecords() hecho después de la entrega da 0 (medido con probe:
+        // inmediato 1, tras 100 ms 0). Los sub-cases de arriba aserten
+        // AUSENCIA (0 ⇒ cierto tanto con la cola pendiente como con los
+        // records ya entregados); la guarda aserte PRESENCIA (≥ 1) y por eso
+        // debe leer antes de la entrega.
+        setTimeout(() => {
+          doc.body.appendChild(doc.createElement('div'));
+          registrosNodoExtra = observer.takeRecords().length;
+        }, 500);
       }
     }
     observer.takeRecords(); // descarta lo acumulado hasta el despacho (p. ej. el fin de la animación)
@@ -218,7 +229,11 @@ async function escenarioP2(apiFns, { html, id, accion, valor, esFill = false, co
   const restante = 1000 - (performance.now() - t0);
   await sleep(Math.max(0, restante) + 60);
 
-  return observer.takeRecords().length;
+  // Para los sub-cases (conNodoExtra:false) esto es el conteo final; para la
+  // guarda (conNodoExtra:true) los records de la mutación del test ya fueron
+  // entregados a esta altura, así que se devuelve lo capturado en el mismo
+  // tick de la mutación (ver comentario en `descarta`).
+  return Math.max(observer.takeRecords().length, registrosNodoExtra);
 }
 
 test('P2: tras despachar, el observer de la página registra 0 — click / type / performFill; guarda: con nodo extra a t0+500 registra ≥ 1', async () => {
@@ -229,7 +244,7 @@ test('P2: tras despachar, el observer de la página registra 0 — click / type 
   const subCasos = [
     { html: '<button id="b">ok</button>', id: 'b', accion: 'click', etiqueta: 'P2 click' },
     { html: '<input id="x" aria-label="campo">', id: 'x', accion: 'type', valor: 'abc', etiqueta: 'P2 type' },
-    { html: '<input id="x" aria-label="campo">', id: 'x', esFill: true, valor: 'texto', etiqueta: 'P2 fill' },
+    { html: '<input id="x" aria-label="campo">', id: 'x', accion: 'fill', esFill: true, valor: 'texto', etiqueta: 'P2 fill' },
   ];
   for (const c of subCasos) {
     const registros = await escenarioP2(fns, c, c.etiqueta);
@@ -436,30 +451,43 @@ test('P4: cada rechazo devuelve {signaled:false} sin elemento nuevo ni registros
       // performActionAndObserve/performFill rechaza — un signaled:false por un
       // motivo distinto al del despacho (o un fixture que en realidad
       // despacharía) no puede pasar acá.
+      //
+      // EXCEPCIÓN — "el desconectado" (D-1 / spec discovery A.2): se omite la
+      // guarda de paridad para ESTE caso, no el caso. El camino real del
+      // despacho vuelve a resolver el ref y a re-evaluar los guards, de modo
+      // que en producción un elemento desconectado se detecta como `stale`
+      // ANTES de llegar al despacho; aquí el ref ya viene resuelto, así que
+      // performActionAndObserve puede devolver ok:true (es exactamente el
+      // falso positivo que motivó D-1: nodo quitado durante la señal ⇒
+      // `{ok:true}` con el click en un nodo desconectado, discovery A.2).
+      // La postcondición P4 del caso se mantiene intacta arriba
+      // (signalAction ⇒ signaled:false, sin elemento nuevo ni registros).
       const opcionesGuarda = { waitMs: 500, quietMs: 30 };
-      if (c.nombre === 'fondo inerte bajo diálogo modal sin force') {
-        opcionesGuarda.force = false;
-      }
-      let resReal;
-      if (c.viaFill) {
-        resReal = await fns.performFill(el, c.valor, opcionesGuarda);
-        assert.equal(
-          resReal.success,
-          false,
-          `${etiqueta}: guarda — performFill con el mismo caso da success:false; recibido ${JSON.stringify(resReal)}`,
-        );
-      } else {
-        resReal = await fns.performActionAndObserve(el, c.accion, c.valor, opcionesGuarda);
-        assert.equal(
-          resReal.ok,
-          false,
-          `${etiqueta}: guarda — performActionAndObserve con el mismo caso da ok:false; recibido ${JSON.stringify(resReal)}`,
-        );
-        if (c.nombre === 'pregunta nativa pendiente') {
-          assert.ok(
-            resReal.nativeDialog,
-            `${etiqueta}: guarda — el rechazo del despacho nombra la pregunta (nativeDialog); recibido ${JSON.stringify(resReal)}`,
+      if (c.nombre !== 'el desconectado') {
+        if (c.nombre === 'fondo inerte bajo diálogo modal sin force') {
+          opcionesGuarda.force = false;
+        }
+        let resReal;
+        if (c.viaFill) {
+          resReal = await fns.performFill(el, c.valor, opcionesGuarda);
+          assert.equal(
+            resReal.success,
+            false,
+            `${etiqueta}: guarda — performFill con el mismo caso da success:false; recibido ${JSON.stringify(resReal)}`,
           );
+        } else {
+          resReal = await fns.performActionAndObserve(el, c.accion, c.valor, opcionesGuarda);
+          assert.equal(
+            resReal.ok,
+            false,
+            `${etiqueta}: guarda — performActionAndObserve con el mismo caso da ok:false; recibido ${JSON.stringify(resReal)}`,
+          );
+          if (c.nombre === 'pregunta nativa pendiente') {
+            assert.ok(
+              resReal.nativeDialog,
+              `${etiqueta}: guarda — el rechazo del despacho nombra la pregunta (nativeDialog); recibido ${JSON.stringify(resReal)}`,
+            );
+          }
         }
       }
     } catch (e) {
