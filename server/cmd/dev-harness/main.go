@@ -45,6 +45,29 @@
 //	                     P11 (fb-024-senal-previa-accion) en vez de P9/P10.
 //	                     Ausente ⇒ señal encendida (P9/P10).
 //
+// Selectores de fb-024-settle-flaky-harness (barreras observables del bloque
+// settle; sólo-harness):
+//
+//	VLP_HARNESS_POLL_DELAY_MS=D retrasa D ms la ENTREGA del comando al poll del
+//	                     fixture (sólo con comando pendiente). Con D > quietMs
+//	                     reproduce de forma determinista la carrera
+//	                     encolar→aplicar: el build previo a las barreras falla
+//	                     P15 (`changed=false`); el build con barreras pasa.
+//	VLP_HARNESS_NOMUT=1  el fixture ignora `mutate-visible` (no-vacuidad, D-6):
+//	                     con las barreras P15 debe FALLAR nombrando el timeout
+//	                     de waitForApplied, nunca pasar en vacío.
+//	VLP_SETTLE_REPEAT=N  corre el bloque settle N veces sobre documento fresco
+//	                     (estrés estadístico, D-7), imprimiendo por iteración
+//	                     resultado y load1; N=1 (default) es el comportamiento
+//	                     actual. Las iteraciones que mueren en PC2 son inválidas
+//	                     (no cuentan como fallo de settle).
+//
+// El bloque settle reporta el progreso del fixture por GET /settle-status
+// (D-1: {applied, transition, doc, loop}) y usa 4 barreras observables (D-2:
+// waitForApplied, waitForTransition, waitForDocChange, waitForAppliedStable)
+// en lugar de esperas fijas. Línea base del gate FRAME_E2E (P6): 153 PASS /
+// 0 FAIL (las barreras agregan precondiciones, no checks nuevos).
+//
 // Códigos de salida del escenario VLP_HARNESS_ONMSG (fb-024 P2/P3, review
 // F-4): 0 = PASS; 1 = FAIL; 2 = VACUO (V-1: el vector no es alcanzable desde
 // `vlp_eval`, el escenario no acredita ni fuerza la corrida). El código
@@ -336,6 +359,27 @@ var mutatePending atomic.Value
 // vs. inicio de la espera, observada como falso settled:true en corrida 2).
 var loopState atomic.Value
 
+// pollDelayMS (fb-024 D-5): retraso en ms de la ENTREGA del comando al poll
+// cuando hay comando pendiente. Sólo-harness (VLP_HARNESS_POLL_DELAY_MS);
+// reproduce de forma determinista la carrera encolar→aplicar sin depender de
+// la carga del host (con D > quietMs la espera fija previa a la barrera falla).
+var pollDelayMS int
+
+// settleReport (fb-024 D-1): progreso del fixture reportado por su poll
+// (doc token por carga, applied = nº de efectos DOM, transition idle|running|
+// done). Viaja por HTTP, no por mutaciones del DOM observado por settle (I-4);
+// el harness lo lee en /settle-status para las barreras observables (D-2).
+type settleReport struct {
+	Applied    int    `json:"applied"`
+	Transition string `json:"transition"`
+	Doc        string `json:"doc"`
+	Loop       string `json:"loop"`
+}
+
+// settleReportState: último reporte del fixture (atomic: lo escribe el handler
+// del poll, lo leen /settle-status y las barreras).
+var settleReportState atomic.Value
+
 // testPageHTML: página SPA-like servida por el harness para la E2E de
 // invalidación. Un botón "Agregar nodo" cuyo listener muta el DOM (SPA-like),
 // un input sin listeners (acción no mutante), y texto visible.
@@ -371,14 +415,23 @@ const testPageHTML = `<!doctype html>
 <script>
 // fb-018-006: transición controlada (delay 1200 ms > quietMs=300).
 // El guard "running" hace no-op re-entradas (doble consumo del poll).
+// fb-024 D-1: el fixture mantiene applied/transitionState/DOC y los reporta
+// por el poll. applied cuenta CADA efecto DOM (no el encolado del comando):
+// es la premisa observable que las barreras exigen. DOC es un token por
+// carga (doc nuevo equivale a documento nuevo). No escribe nodos de estado.
 var TRANSITION_DELAY_MS = 1200;
+var NOMUT = %NOMUT%; // fb-024 D-6: ignora mutate-visible (no-vacuidad)
+var applied = 0;
+var transitionState = 'idle';
+var DOC = 'd' + Date.now() + '-' + Math.random().toString(36).slice(2);
 function startTransition() {
   if (startTransition.running) return;
   startTransition.running = true;
+  transitionState = 'running';
   var tick = 0;
   var iv = setInterval(function () {
     var m = document.getElementById('loop-marker');
-    if (m) m.setAttribute('data-tick', 't' + (++tick));
+    if (m) { m.setAttribute('data-tick', 't' + (++tick)); applied++; }
   }, 200);
   setTimeout(function () {
     clearInterval(iv);
@@ -390,21 +443,31 @@ function startTransition() {
     b.textContent = 'contenido-final-listo';
     fin.appendChild(b);
     document.body.appendChild(fin);
+    applied++;
+    transitionState = 'done';
     startTransition.running = false;
   }, TRANSITION_DELAY_MS);
 }
 document.getElementById('transition-btn').addEventListener('click', startTransition);
 </script>
 <script>
-// El poll REPORTA el estado del loop (query param state) — canal de
-// sincronización del harness: los pasos settle con mutación continua solo
-// corren cuando el loop está verifablemente activo (fb-018-006 3.5).
+// El poll REPORTA el estado del loop y el progreso del fixture (fb-024 D-1) —
+// canal de sincronización del harness: los pasos settle solo corren cuando la
+// premisa está observablemente cumplida (fb-018-006 3.5).
 setInterval(function () {
-  fetch('/mutate-cmd?state=' + (startTransition.loop ? 'on' : 'off')).then(function (r) { return r.text(); }).then(function (cmd) {
+  var qs = 'state=' + (startTransition.loop ? 'on' : 'off') +
+           '&doc=' + encodeURIComponent(DOC) +
+           '&applied=' + applied +
+           '&transition=' + transitionState;
+  fetch('/mutate-cmd?' + qs).then(function (r) { return r.text(); }).then(function (cmd) {
     if (cmd === 'mutate-visible') {
-      document.body.appendChild(Object.assign(document.createElement('button'), {textContent: 'nuevo'}));
+      if (!NOMUT) {
+        document.body.appendChild(Object.assign(document.createElement('button'), {textContent: 'nuevo'}));
+        applied++;
+      }
     } else if (cmd === 'mutate-attr') {
       document.querySelector('input').setAttribute('data-irrelevant', 'y');
+      applied++;
     } else if (cmd === 'transition') {
       startTransition();
     } else if (cmd === 'loop-on') {
@@ -412,10 +475,11 @@ setInterval(function () {
       var tick = 0;
       var loopFn = function () {
         var m = document.getElementById('loop-marker');
-        if (m) m.setAttribute('data-tick', 'L' + (++tick));
+        if (m) { m.setAttribute('data-tick', 'L' + (++tick)); applied++; }
       };
       loopFn();
-      startTransition.loop = setInterval(loopFn, 200);
+      // fb-024 D-4: tick 100 ms (3× de margen sobre quietMs=300).
+      startTransition.loop = setInterval(loopFn, 100);
     } else if (cmd === 'loop-off') {
       if (startTransition.loop) { clearInterval(startTransition.loop); startTransition.loop = null; }
     }
@@ -653,12 +717,21 @@ func startTestPage() (string, func()) {
 		return "", func() {}
 	}
 	mux := http.NewServeMux()
+	// fb-024 D-6: NOMUT=1 → el fixture ignora mutate-visible (no-vacuidad P5).
+	nomut := "false"
+	if os.Getenv("VLP_HARNESS_NOMUT") == "1" {
+		nomut = "true"
+	}
+	pageHTML := strings.ReplaceAll(testPageHTML, "%NOMUT%", nomut)
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, testPageHTML)
+		fmt.Fprint(w, pageHTML)
 	})
 	mutatePending.Store("")
 	loopState.Store("")
+	settleReportState.Store(settleReport{})
+	// fb-024 D-5: retraso del comando al poll (VLP_HARNESS_POLL_DELAY_MS).
+	pollDelayMS, _ = strconv.Atoi(os.Getenv("VLP_HARNESS_POLL_DELAY_MS"))
 	// /slow?ms=N&n=ID (fb-018-006 enmienda P14): página destino con COMMIT
 	// retrasado — responde tras el delay. El navegador mantiene el documento
 	// previo vivo mientras la respuesta está pendiente: la ventana
@@ -733,13 +806,28 @@ func startTestPage() (string, func()) {
 		fmt.Fprint(w, "ok")
 	})
 	mux.HandleFunc("/mutate-cmd", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
 		// Estado del loop reportado por la página en ESTE poll (fb-018-006).
-		if st := r.URL.Query().Get("state"); st == "on" || st == "off" {
+		if st := q.Get("state"); st == "on" || st == "off" {
 			loopState.Store(st)
+		}
+		// fb-024 D-1: progreso del fixture (doc/applied/transition) reportado en
+		// el MISMO poll. Sólo se actualiza cuando el reporte viene completo.
+		if doc := q.Get("doc"); doc != "" {
+			applied, _ := strconv.Atoi(q.Get("applied"))
+			settleReportState.Store(settleReport{
+				Applied:    applied,
+				Transition: q.Get("transition"),
+				Doc:        doc,
+			})
 		}
 		// Poll de la página: consume el comando pendiente (one-shot).
 		cmd, _ := mutatePending.Load().(string)
 		mutatePending.Store("")
+		// fb-024 D-5: entrega retrasada SÓLO cuando hay comando pendiente.
+		if cmd != "" && pollDelayMS > 0 {
+			time.Sleep(time.Duration(pollDelayMS) * time.Millisecond)
+		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		fmt.Fprint(w, cmd)
 	})
@@ -749,6 +837,20 @@ func startTestPage() (string, func()) {
 		st, _ := loopState.Load().(string)
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		fmt.Fprint(w, st)
+	})
+	// /settle-status (fb-024 D-1/D-2): progreso del fixture (applied,
+	// transition, doc) + estado del loop. Canal por HTTP (I-4): las barreras
+	// observables (D-2) lo consumen sin perturbar la ventana de quietud.
+	mux.HandleFunc("/settle-status", func(w http.ResponseWriter, _ *http.Request) {
+		rep, _ := settleReportState.Load().(settleReport)
+		rep.Loop, _ = loopState.Load().(string)
+		body, err := json.Marshal(rep)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
 	})
 	registerNavHangRoutes(mux)      // fb-020-007: /slowpage + /slowfetch
 	registerFoldRoutes(mux)         // fb-020-008: /fold-act
@@ -929,13 +1031,23 @@ func runFrameE2E(port int, pageURL string) bool {
 	// diff stateless en background, sin debounce): changedSinceLast=true.
 	// El harness pide la mutación directamente al server (http.Get) — sin eval
 	// (bloqueado por la CSP de la extensión) y sin pasar por la extensión.
+	// fb-024 D-2: BARRERA observable en lugar de la espera fija de 300 ms —
+	// `triggerMutate` garantiza encolado, no aplicado (la espera fija no es
+	// barrera); sin ella, bajo carga/latencia inyectada la mutación aún no
+	// estaba aplicada y E2E3 falsaba (misma clase que P15).
+	pre3, pre3OK := readSettleStatus(pageURL)
 	mutOK := triggerMutate(pageURL, "visible")
-	time.Sleep(300 * time.Millisecond)
+	applied3 := pre3OK && waitForApplied(pageURL, pre3.Applied+1, 5*time.Second)
+	if !applied3 {
+		fmt.Printf("  [FAIL] E2E3-pre: timeout de waitForApplied(applied≥%d) — la mutación no quedó aplicada observablemente (pre3 ok=%v applied=%d)\n",
+			pre3.Applied+1, pre3OK, pre3.Applied)
+	}
 	f3, ok3, raw3 := getFrameRaw(port, tabID)
 	fmt.Printf("  [DEBUG] getFrame raw: %.600s\n", raw3)
+	fmt.Printf("  [BARRIER] E2E3: waitForApplied(applied≥%d)=%v (applied pre=%d)\n", pre3.Applied+1, applied3, pre3.Applied)
 	allOK = paso("E2E3: appendChild (button) vía poll → changedSinceLast=true",
-		mutOK && ok3 && f3.Invalidation.ChangedSinceLast,
-		fmt.Sprintf(" (changed %v)", f3.Invalidation.ChangedSinceLast)) && allOK
+		mutOK && applied3 && ok3 && f3.Invalidation.ChangedSinceLast,
+		fmt.Sprintf(" (changed %v, precondición waitForApplied=%v)", f3.Invalidation.ChangedSinceLast, applied3)) && allOK
 
 	// E2E4 — getFrame sin mutar (post E2E3): changedSinceLast=false.
 	f4, ok4 := getFrame(port, tabID)
@@ -1214,6 +1326,12 @@ func rebuildForE2E(repoRoot, srvBin string) bool {
 func runSettleE2E(port int, pageURL string) bool {
 	fmt.Println("\n[E2E-settle] Señal de readiness settle (fb-018-006) — P10-P13, P15, P17-P18 + P19/P20 (enmienda P14)")
 	allOK := true
+	// fb-024 D-1: el canal /settle-status es global al fixture; con DOS tabs de
+	// la página de test (el de E2E0 + el start-url de web-ext) sus polls se
+	// pisan y el reporte (doc/applied) oscila entre ambos — las barreras leen
+	// estado de un documento distinto al que el paso mide. Se colapsa a UN solo
+	// canal cerrando los duplicados antes de las barreras (harness-only).
+	closeDuplicateTestPageTabs(port, pageURL)
 
 	tabID, tabOK := findTabByURL(port, pageURL, 10*time.Second)
 	if !paso("SET-pre: tab de test detectado (abierto por E2E0)", tabOK, fmt.Sprintf(" (tabId %d)", tabID)) {
@@ -1241,15 +1359,26 @@ func runSettleE2E(port int, pageURL string) bool {
 	// transición: los ticks (200 ms) reinician la ventana de quietud, el swap
 	// a t=1200 también, y la quietud posterior ⇒ settled:true con el mapa
 	// FINAL (no el viejo). waitMs=4000 holgado vs ~1600 de resolución real.
+	// fb-024 D-2: BARRERA — sin ella el settle podía caer ANTES de que el poll
+	// consumiera la transición (encolada en P10), ver quietud pre-swap y
+	// resolver settled:true con contenido viejo (firma waitedMs≈307, NEXT).
+	transRunning := waitForTransition(pageURL, "running", 10*time.Second)
+	if !transRunning {
+		fmt.Println("  [FAIL] P11-true-pre: timeout de waitForTransition(running) — la transición no quedó observablemente iniciada")
+	}
+	if st, ok := readSettleStatus(pageURL); ok {
+		fmt.Printf("  [BARRIER] P11-true: waitForTransition(running)=%v (transition=%s observed, applied=%d, doc=%s)\n",
+			transRunning, st.Transition, st.Applied, st.Doc)
+	}
 	m2, ok2, raw2 := getFrameMap(port, map[string]any{"tabId": tabID, "settle": true, "waitMs": 4000, "quietMs": 300})
 	inv2 := invOf(m2)
 	s2, boolOK2 := inv2["settled"].(bool)
 	w2, intOK2 := isNonNegInt(inv2, "waitedMs")
 	seeFinal := strings.Contains(raw2, "contenido-final-listo")
 	allOK = paso("P11-true: settle durante transición → settled:true + waitedMs entero ≥0 + mapa FINAL (G5 corregido)",
-		ok2 && boolOK2 && s2 && intOK2 && seeFinal,
-		fmt.Sprintf(" (settled=%v bool=%v, waitedMs=%d int≥0=%v, contenido final=%v)",
-			s2, boolOK2, w2, intOK2, seeFinal)) && allOK
+		transRunning && ok2 && boolOK2 && s2 && intOK2 && seeFinal,
+		fmt.Sprintf(" (transition iniciada=%v, settled=%v bool=%v, waitedMs=%d int≥0=%v, contenido final=%v)",
+			transRunning, s2, boolOK2, w2, intOK2, seeFinal)) && allOK
 
 	// SET-3 (P13) — coherencia temporal: re-lectura plain INMEDIATA con la
 	// misma query ⇒ changedSinceLast:false y payload deep-equal (la huella del
@@ -1268,44 +1397,78 @@ func runSettleE2E(port int, pageURL string) bool {
 	// siempre; I-2 en el outcome false). BARRERA: el settle solo arranca con
 	// el loop verifablemente activo (waitForLoopState) — si la página no lo
 	// reporta a tiempo, el paso FALLA honesto (setup), sin fingir veredicto.
+	// fb-024 D-2/D-4: la barrera exige ≥2 ticks REALES del loop DESPUÉS de
+	// arrancarlo (relativo al applied observado antes del loop-on) — con el
+	// tick a 100 ms eso son ~200 ms, y garantiza que el loop muta dentro de la
+	// ventana de quietud (margen 3× sobre quietMs=300, D-4).
+	preLoop, preLoopOK := readSettleStatus(pageURL)
 	loopOn := triggerMutate(pageURL, "loop-on")
 	loopReady := loopOn && waitForLoopState(pageURL, "on", 5*time.Second)
+	appliedReady := loopReady && waitForApplied(pageURL, preLoop.Applied+2, 5*time.Second)
+	if !appliedReady {
+		fmt.Printf("  [FAIL] P11-false-pre: timeout de waitForApplied(applied≥%d) — el loop no aplicó 2 ticks (preLoop ok=%v applied=%d)\n",
+			preLoop.Applied+2, preLoopOK, preLoop.Applied)
+	}
+	if st, ok := readSettleStatus(pageURL); ok {
+		fmt.Printf("  [BARRIER] P11-false: waitForApplied(applied≥%d)=%v (applied=%d observed, loop=%s)\n",
+			preLoop.Applied+2, appliedReady, st.Applied, st.Loop)
+	}
 	m4, ok4, _ := getFrameMap(port, map[string]any{"tabId": tabID, "settle": true, "waitMs": 1500, "quietMs": 300})
 	inv4 := invOf(m4)
 	s4, boolOK4 := inv4["settled"].(bool)
 	_, intOK4 := isNonNegInt(inv4, "waitedMs")
 	allOK = paso("P11-false: settle con mutación continua (waitMs=1500) → settled:false + ambas claves presentes",
-		loopReady && ok4 && boolOK4 && !s4 && intOK4,
-		fmt.Sprintf(" (loop activo confirmado=%v, settled=%v bool=%v, waitedMs presente=%v)",
-			loopReady, s4, boolOK4, intOK4)) && allOK
+		loopReady && appliedReady && ok4 && boolOK4 && !s4 && intOK4,
+		fmt.Sprintf(" (loop activo confirmado=%v, applied≥%d=%v, settled=%v bool=%v, waitedMs presente=%v)",
+			loopReady, preLoop.Applied+2, appliedReady, s4, boolOK4, intOK4)) && allOK
 
 	// SET-5 (P12) — timeout ⇒ frame COMPLETO (I-A: sections+read presentes,
 	// NUNCA una respuesta sin mapa por la espera).
+	// fb-024 D-2: P12 re-aserta el loop activo antes de su settle (antes
+	// dependía de la barrera de P11-false sin re-verificar).
+	loopStillOn := waitForLoopState(pageURL, "on", 2*time.Second)
+	if !loopStillOn {
+		fmt.Println("  [FAIL] P12-pre: timeout de waitForLoopState(on) — el loop se apagó entre P11-false y P12")
+	}
 	m5, ok5, raw5 := getFrameMap(port, map[string]any{"tabId": tabID, "settle": true, "waitMs": 1500, "quietMs": 300})
 	s5, _ := invOf(m5)["settled"].(bool)
 	secs, _ := m5["sections"].([]any)
 	readArr, _ := m5["read"].([]any)
 	allOK = paso("P12: timeout ⇒ settled:false + frame completo (sections+read, nunca respuesta sin mapa)",
-		ok5 && !s5 && len(secs) > 0 && readArr != nil,
-		fmt.Sprintf(" (settled=%v, sections=%d, read=%d, bytes=%d)", s5, len(secs), len(readArr), len(raw5))) && allOK
+		loopStillOn && ok5 && !s5 && len(secs) > 0 && readArr != nil,
+		fmt.Sprintf(" (loop re-confirmado=%v, settled=%v, sections=%d, read=%d, bytes=%d)", loopStillOn, s5, len(secs), len(readArr), len(raw5))) && allOK
 
 	// fin del loop: barrera de loop inactivo reportado por la página + drenaje
 	// antes de los pasos que asumen página quieta (tras "off" confirmado no
 	// quedan ticks: clearInterval no deja callbacks pendientes).
 	_ = triggerMutate(pageURL, "loop-off")
 	loopOff := waitForLoopState(pageURL, "off", 5*time.Second)
-	time.Sleep(250 * time.Millisecond)
+	// fb-024 D-2: BARRERA de quietud real en lugar del Sleep(250 ms) — el
+	// fixture confirma applied sin cambios durante 300 ms (= quietMs), no una
+	// espera fija que no prueba que la página ya está quieta.
+	appliedStable := waitForAppliedStable(pageURL, 300*time.Millisecond, 10*time.Second)
+	if !appliedStable {
+		fmt.Println("  [FAIL] P11-quiet-pre: timeout de waitForAppliedStable(300ms) — applied no quedó quieto")
+	}
+	if st, ok := readSettleStatus(pageURL); ok {
+		fmt.Printf("  [BARRIER] P11-quiet: waitForAppliedStable(300ms)=%v (applied=%d observed, loop=%s)\n",
+			appliedStable, st.Applied, st.Loop)
+	}
 
 	// SET-6 (P11 cierre) — settle en página QUIETA (sin transición de por
 	// medio): segundo outcome true, waitedMs ≈ quietMs (piso holgado 150).
-	m6, ok6, _ := getFrameMap(port, map[string]any{"tabId": tabID, "settle": true, "waitMs": 1500, "quietMs": 300})
+	// fb-024 D-3: waitMs 1500→4000 — debe cubrir dos saltos de timer (quietMs
+	// + yield de runSerializeStep) más starvation del content script; la
+	// aserción no tiene cota superior (waitedMs≥150 es piso), así que dar más
+	// presupuesto no relaja nada verificado.
+	m6, ok6, _ := getFrameMap(port, map[string]any{"tabId": tabID, "settle": true, "waitMs": 4000, "quietMs": 300})
 	inv6 := invOf(m6)
 	s6, boolOK6 := inv6["settled"].(bool)
 	w6, intOK6 := isNonNegInt(inv6, "waitedMs")
 	allOK = paso("P11-quiet: settle en página quieta → settled:true + waitedMs ≥150 (cierra los dos outcomes de P11)",
-		loopOff && ok6 && boolOK6 && s6 && intOK6 && w6 >= 150,
-		fmt.Sprintf(" (loop inactivo confirmado=%v, settled=%v bool=%v, waitedMs=%d int=%v)",
-			loopOff, s6, boolOK6, w6, intOK6)) && allOK
+		loopOff && appliedStable && ok6 && boolOK6 && s6 && intOK6 && w6 >= 150,
+		fmt.Sprintf(" (loop inactivo confirmado=%v, applied estable=%v, settled=%v bool=%v, waitedMs=%d int=%v)",
+			loopOff, appliedStable, s6, boolOK6, w6, intOK6)) && allOK
 
 	// SET-7 (P15) — changedSinceLast intacto (I7): reset (navegación) ⇒ true;
 	// tras mutación real ⇒ true; repetida sin mutación ⇒ false. La "primera
@@ -1315,8 +1478,17 @@ func runSettleE2E(port int, pageURL string) bool {
 	// distinta ⇒ recarga garantizada; la página limpia difiere de la
 	// acumulada ⇒ primera lectura post-reset reporta true).
 	p15Build := ensureBuildMode(port)
+	// fb-024 D-2: BARRERA de documento nuevo — el doc token previo se captura
+	// antes de navegar y se espera el cambio antes de la lectura de reset (la
+	// espera fija de 1500 ms no probaba que el documento fresco ya había
+	// cargado).
+	preNav, _ := readSettleStatus(pageURL)
+	prevDoc := preNav.Doc
 	_, navOK := mcpCall(port, "vlp_navigate", map[string]any{"tabId": tabID, "url": pageURL + "?p15=1"})
-	time.Sleep(1500 * time.Millisecond) // recarga local: la página nueva reemplaza a la acumulada
+	docChanged := waitForDocChange(pageURL, prevDoc, 10*time.Second)
+	if !docChanged {
+		fmt.Printf("  [FAIL] P15-pre: timeout de waitForDocChange — el documento fresco no cargó (prevDoc=%q)\n", prevDoc)
+	}
 	var m7a map[string]any
 	ok7a := false
 	for i := 0; i < 5 && !ok7a; i++ { // reintenta SOLO fallas de transporte (tab cargando), nunca contenido
@@ -1326,16 +1498,28 @@ func runSettleE2E(port int, pageURL string) bool {
 		}
 	}
 	changed7a := invChanged(m7a)
+	// fb-024 D-2: la mutación real debe quedar APLICADA antes de la lectura b
+	// (triggerMutate sólo garantiza encolado; la espera fija de 300 ms era la
+	// causa medida del `changed=false` de P15).
+	preMut, preMutOK := readSettleStatus(pageURL)
 	mutOK7 := triggerMutate(pageURL, "visible")
-	time.Sleep(300 * time.Millisecond)
+	applied7 := preMutOK && waitForApplied(pageURL, preMut.Applied+1, 5*time.Second)
+	if !applied7 {
+		fmt.Printf("  [FAIL] P15-pre: timeout de waitForApplied(applied≥%d) — la mutación no quedó aplicada (preMut ok=%v applied=%d)\n",
+			preMut.Applied+1, preMutOK, preMut.Applied)
+	}
+	if st, ok := readSettleStatus(pageURL); ok {
+		fmt.Printf("  [BARRIER] P15: waitForDocChange=%v (doc %s→%s), waitForApplied(applied≥%d)=%v (pre=%d observed applied=%d transition=%s)\n",
+			docChanged, prevDoc, st.Doc, preMut.Applied+1, applied7, preMut.Applied, st.Applied, st.Transition)
+	}
 	m7b, ok7b, _ := getFrameMap(port, map[string]any{"tabId": tabID})
 	changed7b := invChanged(m7b)
 	m7c, ok7c, _ := getFrameMap(port, map[string]any{"tabId": tabID})
 	changed7c := invChanged(m7c)
 	allOK = paso("P15: changedSinceLast intacto — reset(navegación)=true, mutación real=true, repetida=false",
-		p15Build && navOK && ok7a && changed7a && mutOK7 && ok7b && changed7b && ok7c && !changed7c,
-		fmt.Sprintf(" (build=%v nav=%v, reset changed=%v, mutación=%v changed=%v, repetida changed=%v)",
-			p15Build, navOK, changed7a, mutOK7, changed7b, changed7c)) && allOK
+		p15Build && navOK && docChanged && ok7a && changed7a && mutOK7 && applied7 && ok7b && changed7b && ok7c && !changed7c,
+		fmt.Sprintf(" (build=%v nav=%v docChanged=%v, reset changed=%v, mutación=%v waitForApplied=%v changed=%v, repetida changed=%v)",
+			p15Build, navOK, docChanged, changed7a, mutOK7, applied7, changed7b, changed7c)) && allOK
 
 	// SET-8 (P18) — error path intacto: getFrame con settle sobre tab
 	// inexistente ⇒ el MISMO error que el plain (la espera no introduce una
@@ -1434,6 +1618,103 @@ func runSettleE2E(port int, pageURL string) bool {
 		fmt.Sprintf(" (build=%v, nav=%v, frame=%v, settled=%v bool=%v, marker -2=%v, marker -1 previo=%v)",
 			navBuild12, navOK12, ok12, s12, boolOK12, seeDest12, seePrev12)) && allOK
 
+	return allOK
+}
+
+// closeDuplicateTestPageTabs (fb-024 D-1): deja UN solo tab del fixture de
+// test (pageURL). Con más de uno, sus polls de /mutate-cmd pisan el mismo
+// estado global (settleReportState/loopState) y las barreras observables leen
+// estado de un documento distinto al que el paso mide. Mantiene el tab que
+// findTabByURL resuelve (el que usan los pasos) y cierra los duplicados.
+func closeDuplicateTestPageTabs(port int, pageURL string) {
+	keep, _ := findTabByURL(port, pageURL, 5*time.Second)
+	txt, ok := mcpCall(port, "vlp_listTabs", map[string]any{})
+	if !ok {
+		return
+	}
+	var tabs []tabInfo
+	if !parseJSON(txt, &tabs) {
+		return
+	}
+	for _, t := range tabs {
+		if t.ID == keep {
+			continue
+		}
+		if t.URL == pageURL {
+			mcpCall(port, "vlp_closeTab", map[string]any{"tabId": t.ID})
+			fmt.Printf("  [NOTE] tab duplicado del fixture cerrado (id=%d url=%s)\n", t.ID, t.URL)
+		}
+	}
+}
+
+// loadAvg1 (fb-024 D-7): primer campo de /proc/loadavg (carga 1-min) — se
+// registra por iteración del modo de estrés estadístico.
+func loadAvg1() string {
+	b, err := os.ReadFile("/proc/loadavg")
+	if err != nil {
+		return "n/a"
+	}
+	f := strings.Fields(string(b))
+	if len(f) == 0 {
+		return "n/a"
+	}
+	return f[0]
+}
+
+// reloadTestFixture (fb-024 D-7): deja el tab de test sobre el fixture exacto
+// (pageURL) para que la iteración arranque sobre un documento fresco — los
+// pasos SET-* dejan el tab en /slow o ?p15=1, que no sirven para P10/P11-true.
+// Espera el cambio del doc token (documento nuevo observable). fresh=false ⇒
+// la iteración es inválida (clase PC2), nunca un fallo de settle.
+func reloadTestFixture(port int, pageURL string) bool {
+	tabID, tabOK := findTabByURL(port, pageURL, 10*time.Second)
+	if !tabOK {
+		return false
+	}
+	if !ensureBuildMode(port) {
+		return false
+	}
+	prev, _ := readSettleStatus(pageURL)
+	_, navOK := mcpCall(port, "vlp_navigate", map[string]any{"tabId": tabID, "url": pageURL})
+	if !navOK {
+		return false
+	}
+	return waitForDocChange(pageURL, prev.Doc, 15*time.Second)
+}
+
+// runSettleRepeat (fb-024 D-7): corre el bloque settle N veces, cada una sobre
+// un documento fresco; imprime por iteración el resultado y la carga 1-min
+// (/proc/loadavg). Una iteración que no logra preparar el documento fresco
+// (clase PC2) es INVÁLIDA: se informa como tal y no cuenta como fallo.
+func runSettleRepeat(port int, pageURL string, n int) bool {
+	fmt.Printf("\n[E2E-settle-repeat] VLP_SETTLE_REPEAT=%d — bloque settle × %d sobre documento fresco\n", n, n)
+	allOK := true
+	valid, invalid := 0, 0
+	for valid < n {
+		if invalid > n*2 {
+			fmt.Printf("  [FAIL] settle-block: demasiadas iteraciones inválidas (%d) — aborto\n", invalid)
+			return false
+		}
+		load := loadAvg1()
+		if !reloadTestFixture(port, pageURL) {
+			invalid++
+			fmt.Printf("  [REPEAT] iteración inválida (documento fresco no preparable) load1=%s — no cuenta\n", load)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		ok := runSettleE2E(port, pageURL)
+		valid++
+		fmt.Printf("  [REPEAT] iteración %d/%d load1=%s resultado=%v\n", valid, n, load, ok)
+		allOK = allOK && ok
+	}
+	if invalid > 0 {
+		fmt.Printf("  [REPEAT] iteraciones inválidas: %d (no cuentan)\n", invalid)
+	}
+	if allOK {
+		fmt.Printf("settle-block: PASS (%d/%d iteraciones, 0 fallos de settle)\n", n, n)
+	} else {
+		fmt.Println("settle-block: FAIL")
+	}
 	return allOK
 }
 
@@ -2588,7 +2869,20 @@ func main() {
 		// fb-018-006 3.5: la E2E de settle corre sobre el MISMO tab (reutiliza
 		// el estado de lastFrameByTab y el boot); se ejecuta aunque E2E1-E2E7
 		// hayan fallado (más evidencia; nunca enmascara el fallo previo).
-		settleOK := connected && runSettleE2E(serverPort, testPageURL)
+		// fb-024 D-7: VLP_SETTLE_REPEAT=N>1 corre el bloque N veces sobre
+		// documento fresco (estrés estadístico); N=1 (default) es el actual.
+		settleRepeat := 1
+		if v, err := strconv.Atoi(os.Getenv("VLP_SETTLE_REPEAT")); err == nil && v > 1 {
+			settleRepeat = v
+		}
+		settleOK := false
+		if connected {
+			if settleRepeat > 1 {
+				settleOK = runSettleRepeat(serverPort, testPageURL, settleRepeat)
+			} else {
+				settleOK = runSettleE2E(serverPort, testPageURL)
+			}
+		}
 		// fb-020-002 C6: P20-P23 en tab propio; corre aunque lo previo haya
 		// fallado (más evidencia, nunca enmascara).
 		typeOK := connected && runTypeObserveE2E(serverPort, testPageURL)
