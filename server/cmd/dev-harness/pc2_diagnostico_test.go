@@ -82,9 +82,9 @@ func newPc2McpFixture(t *testing.T) (*pc2McpFixture, int) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			ID     json.RawMessage   `json:"id"`
-			Method string            `json:"method"`
-			Params map[string]any    `json:"params"`
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+			Params map[string]any  `json:"params"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)

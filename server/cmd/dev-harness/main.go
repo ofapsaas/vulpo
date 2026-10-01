@@ -42,8 +42,9 @@
 //	                     de prueba P6 de fb-024-bootstrap-solo-dev, D-4).
 //	VLP_HARNESS_NOTABS=1 arma la copia con harness-config.js cuyo dominio NO
 //	                     matchea la start-url: la extensión registra (S1) pero
-//	                     listTabs queda vacío y la barrera de PC2 vence
-//	                     (selector de prueba P4, D-4).
+//	                     listTabs queda vacío y la barrera de PC2 vence en
+//	                     FRAME_E2E (selector de prueba P4, D-4); sólo actúa
+//	                     con VLP_FRAME_E2E=1.
 //	VLP_HARNESS_SIGNAL=off inyecta harness-signal.js en la copia (nunca en el
 //	                     repo/XPI) y apaga `vlp_action_signal`: el runner corre
 //	                     P11 (fb-024-senal-previa-accion) en vez de P9/P10.
@@ -55,15 +56,17 @@
 // perfil ya listo. El fail-fast de PC2 nombra el estado OBSERVADO, nunca una
 // causa no observable (el console del background no es observable; discovery
 // §1.5). Las tres líneas posibles son:
-//   (a) VLP_HARNESS_NOCONFIG=1 → "extension not configured — ... omitted
-//       harness-config.js from the copy" (config omitida por selector).
-//   (b) registró el intento pero no hubo registro → "extension did not
-//       register within the PC2 timeout — ... likely the MV3 event page did
-//       not start ... otherwise harness-config.js failed" (causa candidata,
-//       sin afirmarla).
-//   (c) registró pero el tab de la start-url no apareció en listTabs dentro
-//       de T → "extension registered but the start-url tab did not appear in
-//       listTabs within 30s" (vence la barrera D-1, sin escenarios).
+//
+//	(a) VLP_HARNESS_NOCONFIG=1 → "extension not configured — ... omitted
+//	    harness-config.js from the copy" (config omitida por selector).
+//	(b) registró el intento pero no hubo registro → "extension did not
+//	    register within the PC2 timeout — ... likely the MV3 event page did
+//	    not start ... otherwise harness-config.js failed" (causa candidata,
+//	    sin afirmarla).
+//	(c) registró pero el tab de la start-url no apareció en listTabs dentro
+//	    de T → "extension registered but the start-url tab did not appear in
+//	    listTabs within 30s" (vence la barrera D-1, sin escenarios).
+//
 // La línea (b) no distingue config rota de arranque MV3: no es observable con
 // los canales actuales (un beacon extensión→harness sería la vía; deuda Q1).
 //
@@ -895,35 +898,59 @@ func parseJSON(text string, v any) bool {
 	return json.Unmarshal([]byte(text), v) == nil
 }
 
-// findTabByURL: lista tabs y devuelve el tabId de la página de test.
-// MEJOR ESFUERZO: reintenta hasta timeout porque el tab puede tardar en
-// aparecer en listTabs tras openTab.
-//
-// Matching en dos niveles:
+// matchTab: primer tab que matchea pageURL. Matching en dos niveles:
 //  1. Exact match: url == pageURL (openTab abre exactamente pageURL).
 //  2. Fallback: URLs que empiezan con pageURL (rutas de la página de test).
-func findTabByURL(port int, pageURL string, timeout time.Duration) (int, bool) {
+//
+// Núcleo compartido por findTabByURL y waitForStartURLTab (D-1: la barrera
+// reusa la MISMA semántica exact→prefix, sin duplicar el loop).
+func matchTab(tabs []tabInfo, pageURL string) (tabInfo, bool) {
+	for _, t := range tabs {
+		if t.URL == pageURL {
+			return t, true
+		}
+	}
+	for _, t := range tabs {
+		if strings.HasPrefix(t.URL, pageURL) {
+			return t, true
+		}
+	}
+	return tabInfo{}, false
+}
+
+// pollTabByURL: sondea vlp_listTabs hasta que matchTab(pageURL) encuentre un
+// tab o venza timeout. MEJOR ESFUERZO: reintenta porque el tab puede tardar en
+// aparecer en listTabs tras openTab. Devuelve el tab matcheado, el ok y el
+// último snapshot observado (nil si nunca hubo respuesta parseable) — el
+// tercer valor alimenta el diagnóstico de timeout de la barrera PC2.
+func pollTabByURL(port int, pageURL string, timeout time.Duration) (tabInfo, bool, []tabInfo) {
 	deadline := time.Now().Add(timeout)
+	var last []tabInfo
 	for time.Now().Before(deadline) {
 		text, ok := mcpCall(port, "vlp_listTabs", map[string]any{})
 		if ok {
 			var tabs []tabInfo
 			if parseJSON(text, &tabs) {
-				for _, t := range tabs {
-					if t.URL == pageURL {
-						return t.ID, true
-					}
-				}
-				for _, t := range tabs {
-					if strings.HasPrefix(t.URL, pageURL) {
-						return t.ID, true
-					}
+				last = tabs
+				if t, found := matchTab(tabs, pageURL); found {
+					return t, true, tabs
 				}
 			}
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	return 0, false
+	return tabInfo{}, false, last
+}
+
+// findTabByURL: lista tabs y devuelve el tabId de la página de test.
+// MEJOR ESFUERZO: reintenta hasta timeout porque el tab puede tardar en
+// aparecer en listTabs tras openTab.
+func findTabByURL(port int, pageURL string, timeout time.Duration) (int, bool) {
+	t, ok, _ := pollTabByURL(port, pageURL, timeout)
+	if !ok {
+		return 0, false
+	}
+	return t.ID, true
 }
 
 // frameInfo: subconjunto del Frame contract + invalidation (fb-017-004)
@@ -2926,7 +2953,7 @@ func main() {
 	// sin el tab) y sale ≠ 0 antes de todo escenario (P4).
 	if frameE2E && connected {
 		if _, ok := waitForStartURLTab(serverPort, testPageURL, pc2StartURLTabTimeout); !ok {
-			fmt.Printf("  [FAIL] precondition: extension registered but the start-url tab did not appear in listTabs within %s\n", pc2StartURLTabTimeout)
+			fmt.Printf("  [FAIL] precondition: extension registered but the start-url tab did not appear in listTabs within %s (%s)\n", pc2StartURLTabTimeout, describeLastListTabs())
 			cleanup()
 			os.Exit(1)
 		}
