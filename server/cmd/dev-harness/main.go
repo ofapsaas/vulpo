@@ -36,6 +36,10 @@
 //	                     raíz del repo se rechaza con [FAIL] (fb-024 #4a).
 //	VLP_HARNESS_BADTOKEN=1 escribe en el archivo de tokens un token ajeno al
 //	                     harness (selector de prueba P10: fuerza el fail-fast 401).
+//	VLP_HARNESS_NOCONFIG=1 arma la copia SIN inyectar harness-config.js — la
+//	                     extensión no queda configurada y el harness hace
+//	                     fail-fast con nombre antes de todo escenario (selector
+//	                     de prueba P6 de fb-024-bootstrap-solo-dev, D-4).
 //
 // Nota: se usa web-ext (herramienta oficial de Mozilla) porque carga el addon
 // como TEMPORARY ADD-ON, que es el mecanismo que activa el service worker MV3.
@@ -54,7 +58,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -188,6 +191,12 @@ func waitFor(fn func() bool, timeout time.Duration, step string) bool {
 
 // seedStorage: escribe vlp_rules + vlp_debug_autoconnect en el
 // storage.sync del perfil de Firefox (SQLite), apuntando al server local.
+//
+// DEUDA (fb-024-bootstrap-solo-dev, §1 Out): esta ruta VLP_DEV_HARNESS ya
+// estaba rota antes del ciclo — siembra el ext_id `vulpo@example.com` en
+// storage.sync mientras el manifest usa `vulpo@pablorizzo.com`, así que FF154
+// no lee la fila. Queda como está (no se repara acá); su autoconnect se borró
+// del producto en D-1.
 func seedStorage(profileDir string, serverPort int) error {
 	dbPath := filepath.Join(profileDir, "storage-sync-v2.sqlite")
 	if err := os.MkdirAll(profileDir, 0o755); err != nil {
@@ -622,12 +631,11 @@ var nativeDialogSteps = map[string]bool{
 	"confirm-on-input": true,
 }
 
-// startTestPage: sirve testPageHTML (ruta /) y la página bootstrap
-// /vulpo-bootstrap?rules=<urlencoded> (fb-017-004) en 127.0.0.1:0 (puerto
-// efímero). La página bootstrap es el start-url de web-ext en el gate
-// FRAME_E2E: el event page la detecta vía tabs.query y persiste las reglas en
-// storage.local (el seed por sqlite de storage.sync no es leído por FF154).
-// Devuelve la URL base y una función de shutdown.
+// startTestPage: sirve testPageHTML (ruta /) en 127.0.0.1:0 (puerto efímero).
+// Es la página de test y el start-url de web-ext en el gate FRAME_E2E (la
+// configuración del harness la aplica harness-config.js en la copia, no una
+// URL — D-2/fb-024-bootstrap-solo-dev). Devuelve la URL base y una función de
+// shutdown.
 func startTestPage() (string, func()) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -729,11 +737,6 @@ func startTestPage() (string, func()) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		fmt.Fprint(w, st)
 	})
-	mux.HandleFunc("/vulpo-bootstrap", func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query().Get("rules")
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprintf(w, "<!doctype html><html><head><meta charset=\"utf-8\"><title>vulpo-bootstrap</title></head><body><p>vulpo bootstrap ok: %s</p></body></html>", html.EscapeString(q))
-	})
 	registerNavHangRoutes(mux)  // fb-020-007: /slowpage + /slowfetch
 	registerFoldRoutes(mux)     // fb-020-008: /fold-act
 	registerValidityRoutes(mux) // fb-020-005: /form-validez
@@ -751,12 +754,9 @@ func parseJSON(text string, v any) bool {
 // MEJOR ESFUERZO: reintenta hasta timeout porque el tab puede tardar en
 // aparecer en listTabs tras openTab.
 //
-// Matching en dos niveles para evitar falsos positivos con el tab
-// vulpo-bootstrap (su URL es <pageURL>vulpo-bootstrap?rules=...,
-// que CONTIENE pageURL como prefijo):
+// Matching en dos niveles:
 //  1. Exact match: url == pageURL (openTab abre exactamente pageURL).
-//  2. Fallback: URLs que empiezan con pageURL pero NO contienen
-//     "vulpo-bootstrap" (descarta el tab bootstrap).
+//  2. Fallback: URLs que empiezan con pageURL (rutas de la página de test).
 func findTabByURL(port int, pageURL string, timeout time.Duration) (int, bool) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -770,7 +770,7 @@ func findTabByURL(port int, pageURL string, timeout time.Duration) (int, bool) {
 					}
 				}
 				for _, t := range tabs {
-					if strings.HasPrefix(t.URL, pageURL) && !strings.Contains(t.URL, "vulpo-bootstrap") {
+					if strings.HasPrefix(t.URL, pageURL) {
 						return t.ID, true
 					}
 				}
@@ -2236,11 +2236,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Gate FRAME_E2E: página de test + página bootstrap servidas por el propio
-	// harness (127.0.0.1:0, puerto efímero). No requiere Odoo. El start-url de
-	// web-ext es la URL bootstrap (fb-017-004): el bg la detecta vía tabs.query,
-	// persiste las reglas en storage.local y reconecta — el seed por sqlite de
-	// storage.sync no es leído por FF154 (defecto verificado empíricamente).
+	// Gate FRAME_E2E: página de test servida por el propio harness
+	// (127.0.0.1:0, puerto efímero). No requiere Odoo. El start-url de web-ext
+	// es esa página; la configuración la aplica harness-config.js en la copia
+	// (D-2/fb-024-bootstrap-solo-dev), no una URL. El seed por sqlite de
+	// storage.sync no se usa en este gate (FF154 no lee la fila sembrada).
 	serverPort := 28700 + int(time.Now().Unix()%200)
 	rules := fmt.Sprintf("ws://127.0.0.1:%d %s 127.0.0.1", serverPort, devToken)
 	var closeTestPage func() = func() {}
@@ -2254,7 +2254,7 @@ func main() {
 			os.Exit(1)
 		}
 		testPageURL = tpURL
-		startURL = tpURL + "vulpo-bootstrap?rules=" + url.QueryEscape(rules)
+		startURL = tpURL
 	}
 
 	fmt.Println("=== fb-013-001 dev-harness ===")
@@ -2354,8 +2354,20 @@ func main() {
 			cleanup()
 			os.Exit(1)
 		}
+		// D-2: la configuración se inyecta SIEMPRE en los modos FRAME_E2E,
+		// también con VLP_HARNESS_PLAN=1 (independiente de la inyección de
+		// Build). VLP_HARNESS_NOCONFIG=1 arma la copia sin ella → el harness
+		// hace fail-fast con nombre (D-4 / P6).
+		injectConfig := os.Getenv("VLP_HARNESS_NOCONFIG") != "1"
+		if injectConfig {
+			if err := injectHarnessConfig(dir, rules); err != nil {
+				fmt.Printf("  [FAIL] injectHarnessConfig = %v\n", err)
+				cleanup()
+				os.Exit(1)
+			}
+		}
 		webExtSourceDir = dir
-		fmt.Printf("  [COPY] extension → %s (injectBuild=%v)\n", dir, injectBuild)
+		fmt.Printf("  [COPY] extension → %s (injectBuild=%v, injectConfig=%v)\n", dir, injectBuild, injectConfig)
 	}
 
 	// ---- PC1: arranca el server Go (binario como subproceso) ----
@@ -2402,9 +2414,9 @@ func main() {
 	if frameE2E {
 		// fb-017-004: seed sqlite REMOVIDO en este gate — FF154 no lee la fila
 		// sembrada en storage-sync-v2.sqlite (y la descarta al primer
-		// storage.sync.set del addon). La config llega vía /vulpo-bootstrap
-		// (start-url) → storage.local en el bg.
-		fmt.Println("  [NOTE] seed sqlite omitido (FRAME_E2E usa bootstrap vía URL localhost)")
+		// storage.sync.set del addon). La config la aplica harness-config.js en
+		// la COPIA de la extensión (D-2/fb-024-bootstrap-solo-dev).
+		fmt.Println("  [NOTE] seed sqlite omitido (FRAME_E2E configura vía harness-config.js en la copia)")
 	} else if err := seedStorage(profileDir, serverPort); err != nil {
 		fmt.Printf("  [FAIL] seed storage: %v\n", err)
 		cleanup()
@@ -2463,6 +2475,17 @@ func main() {
 		return ok
 	}, 120*time.Second, "extensión conectada por WS (listTabs round-trip)")
 	close(touchDone)
+	// fb-024-bootstrap-solo-dev D-4: en un modo FRAME_E2E, si la extensión no
+	// registra con el server dentro del timeout de PC2 es una PRECONDICIÓN
+	// fallida: UNA línea de causa nombrada, exit ≠ 0, ANTES de todo escenario.
+	// Sustituye la antigua "desviación conocida — reintentar". El selector
+	// VLP_HARNESS_NOCONFIG=1 arma la copia sin harness-config.js para ejercitar
+	// este camino (P6); en P4 la línea no aparece.
+	if frameE2E && !connected {
+		fmt.Println("  [FAIL] precondition: extension not configured (harness-config) — the extension did not register with the server within the PC2 timeout")
+		cleanup()
+		os.Exit(1)
+	}
 	paso("extensión real conectada (temporary addon MV3, listTabs round-trip)", connected, "")
 	if connected {
 		text, ok := mcpCall(serverPort, "vlp_listTabs", map[string]any{})
@@ -2534,9 +2557,6 @@ func main() {
 		// fb-020-005: validez de formulario en el mapa, perfil REAL de Odoo;
 		// tabs propios, corre último, aunque lo previo haya fallado.
 		valOK := connected && runFormValidityE2E(serverPort, testPageURL)
-		if !connected {
-			fmt.Println("  [FAIL] FRAME_E2E: MV3 service worker no conectó (desviación conocida — reintentar).")
-		}
 		fmt.Println("\n=== RESULT ===")
 		cleanup()
 		if e2eOK && settleOK && typeOK && nativeOK && fieldCaseOK && navHangOK && foldOK && valOK {

@@ -11,6 +11,12 @@ All notable changes to Vulpo are documented here. Format: Keep a Changelog.
   offending line number — never the line's content. Files with one token per
   line (the canonical format) are unaffected.
 
+### Removed
+
+- Debug configuration hooks removed from the shipped extension. The extension
+  takes its configuration only from the Options page; the E2E harness
+  configures its own private copy and no longer relies on those hooks.
+
 ### Fixed
 
 - `dev-harness` (`VLP_FRAME_E2E`) writes the canonical tokens file, probes the
