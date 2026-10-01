@@ -75,6 +75,14 @@ const isTabNavigating = (tabId) => navigatingTabs.has(tabId);
 // fb-020-007 (I-6): núcleo genérico (VulpoNav) y capa ORM (VulpoNavGuard).
 const { watchInjection, routePageProgress, isExtensionPageSender, createDiagnosticRing, HEARTBEAT_MS } = globalThis.VulpoNav;
 const { dispatchAfterNav, guardInjection, probeTabsGuarded, noResultError } = globalThis.VulpoNavGuard;
+// fb-024-onmessage-sender F-6: fail-loud al CARGAR. Si el bundle shipped
+// quedara stale (sin el export), la desestructuración daría `undefined` y el
+// primer mensaje no-fb-progress (primer uso del popup) lanzaría TypeError
+// DENTRO del listener: canal completo roto, diagnóstico tardío. Fallar acá
+// convierte ese fallo en diagnóstico inmediato al arrancar.
+if (typeof isExtensionPageSender !== 'function') {
+  throw new Error('VulpoNav.isExtensionPageSender no es una función — nav-guard-bundle.js stale o desalineado con background.js (fb-024-onmessage-sender F-6)');
+}
 
 // fb-020-008 (act frame fold): módulo del pliegue de lectura en las acciones.
 const { actWithFold, navigateWithFold } = globalThis.VulpoFrameFold || {};

@@ -45,6 +45,13 @@
 //	                     P11 (fb-024-senal-previa-accion) en vez de P9/P10.
 //	                     Ausente ⇒ señal encendida (P9/P10).
 //
+// Códigos de salida del escenario VLP_HARNESS_ONMSG (fb-024 P2/P3, review
+// F-4): 0 = PASS; 1 = FAIL; 2 = VACUO (V-1: el vector no es alcanzable desde
+// `vlp_eval`, el escenario no acredita ni fuerza la corrida). El código
+// distintivo de VACUO permite que un consumidor por exit code no confunda el
+// resultado vacuo con un PASS; la línea impresa ya lo distingue ("VACUO" vs
+// "PASS").
+//
 // Nota: se usa web-ext (herramienta oficial de Mozilla) porque carga el addon
 // como TEMPORARY ADD-ON, que es el mecanismo que activa el service worker MV3.
 // El launcher Camoufox (camoufox-with-addon.mjs) instala el addon manualmente
@@ -2557,8 +2564,9 @@ func main() {
 		case onmsgVacuo:
 			// V-1: el vector no es alcanzable desde vlp_eval; P2/P3 quedan
 			// escritos y documentados, pero no se acreditan ni se fuerzan.
+			// F-4: exit code distintivo (2) — no es PASS ni FAIL.
 			fmt.Println("onmessage-sender: VACUO (fb-024 P2/P3 — V-1: vlp_eval no alcanza runtime.sendMessage; ver deuda fb-024-eval-main-world)")
-			os.Exit(0)
+			os.Exit(2)
 		default:
 			fmt.Println("onmessage-sender: FAIL (fb-024 P2/P3)")
 			os.Exit(1)
