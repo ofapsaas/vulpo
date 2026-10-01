@@ -11,12 +11,13 @@
 // jamás un id no verificado sin marcar — I-3).
 //
 // RED discipline (AP-13): un test por postcondition numerada del spec —
-//   P1 TestOpenTabResolve_Exact
-//   P2 TestOpenTabResolve_NewBeatsPreexistingURL  (caso 324/326 medido)
-//   P3 TestOpenTabResolve_TimeoutUnresolved
-//   P4 TestOpenTabResolve_SingleNewRedirect (+ espejo negativo |nuevos|==2
-//      y desempate por menor id de la Enmienda 1 — desdoblamiento de D-5,
-//      sub-tests en el mismo test según test-audit §3/§4)
+//
+//	P1 TestOpenTabResolve_Exact
+//	P2 TestOpenTabResolve_NewBeatsPreexistingURL  (caso 324/326 medido)
+//	P3 TestOpenTabResolve_TimeoutUnresolved
+//	P4 TestOpenTabResolve_SingleNewRedirect (+ espejo negativo |nuevos|==2
+//	   y desempate por menor id de la Enmienda 1 — desdoblamiento de D-5,
+//	   sub-tests en el mismo test según test-audit §3/§4)
 //
 // Todos los tests invocan la tool por la superficie MCP completa
 // (tools/call "vlp_openTab"), así que GREEN debe cablear el resolver EN el
@@ -46,6 +47,12 @@ func fb024OpenTabFast(t *testing.T) {
 // extensión, background.js:1273-1280): {id, url, ...}.
 func fb024tab(id float64, url string) map[string]any {
 	return map[string]any{"id": id, "url": url}
+}
+
+// fb024tab3 ídem, con title distinguible (D-1: la respuesta es
+// {id,url,title} — las filas del handler de la extensión traen title).
+func fb024tab3(id float64, url, title string) map[string]any {
+	return map[string]any{"id": id, "url": url, "title": title}
 }
 
 // fb024OpenTabResult llama tools/call vlp_openTab(url="http://x") contra s y
@@ -98,7 +105,7 @@ func TestOpenTabResolve_Exact(t *testing.T) {
 	hub.seqByCommand = map[string][]any{
 		"listTabs": {
 			[]any{fb024tab(320, "about:blank")},
-			[]any{fb024tab(320, "about:blank"), fb024tab(326, "http://x")},
+			[]any{fb024tab(320, "about:blank"), fb024tab3(326, "http://x", "Titulo P1")},
 		},
 		"openTab": {map[string]any{"id": float64(325)}},
 	}
@@ -108,6 +115,11 @@ func TestOpenTabResolve_Exact(t *testing.T) {
 	}
 	if res["url"] != "http://x" {
 		t.Errorf("fb-024 P1 (exact): result.url = %v, want %q (el tab resuelto es el que sirve la URL)", res["url"], "http://x")
+	}
+	// D-1: el retorno es {id,url,title} — el title del tab resuelto (fila
+	// elegida) viaja; si la fila lo trae, el resultado lo expone.
+	if res["title"] != "Titulo P1" {
+		t.Errorf("fb-024 P1 (title): result.title = %v, want el title de la fila elegida 326 (%q) — D-1: la respuesta es {id,url,title} — RED fb-024-opentab-id", res["title"], "Titulo P1")
 	}
 }
 
@@ -161,14 +173,14 @@ func TestOpenTabResolve_TimeoutUnresolved(t *testing.T) {
 // "un solo tab nuevo"; test-audit §3 P4).
 //
 // Tres sub-tests (desdoblamiento de D-5 — Enmienda 1; test-audit):
-//   1. redirect real: el ÚNICO tab nuevo tiene URL distinta (la pedida ya no
-//      matchea por exacto ni prefijo) ⇒ se devuelve ese.
-//   2. espejo negativo (I-3): DOS tabs nuevos sin match ⇒ idUnresolved:true
-//      con el raw — NO se elige arbitrariamente ("el primer nuevo" violaría
-//      D-5: |nuevos|==1 es condición necesaria, no suficiente).
-//   3. desempate de la Enmienda 1: dos tabs nuevos AMBOS con match exacto ⇒
-//      el de MENOR id, determinista (sembrados en orden inverso para
-//      distinguir menor-id de primero-en-orden).
+//  1. redirect real: el ÚNICO tab nuevo tiene URL distinta (la pedida ya no
+//     matchea por exacto ni prefijo) ⇒ se devuelve ese.
+//  2. espejo negativo (I-3): DOS tabs nuevos sin match ⇒ idUnresolved:true
+//     con el raw — NO se elige arbitrariamente ("el primer nuevo" violaría
+//     D-5: |nuevos|==1 es condición necesaria, no suficiente).
+//  3. desempate de la Enmienda 1: dos tabs nuevos AMBOS con match exacto ⇒
+//     el de MENOR id, determinista (sembrados en orden inverso para
+//     distinguir menor-id de primero-en-orden).
 func TestOpenTabResolve_SingleNewRedirect(t *testing.T) {
 	fb024OpenTabFast(t)
 
@@ -219,6 +231,77 @@ func TestOpenTabResolve_SingleNewRedirect(t *testing.T) {
 		res := fb024OpenTabResult(t, s)
 		if res["id"] != float64(330) {
 			t.Fatalf("fb-024 P4 (Enmienda 1, D-5): result = %v, want id==330 — dos tabs nuevos con match exacto de http://x ⇒ desempate determinista por MENOR id (no primero-en-orden ni crudo 325) — RED fb-024-opentab-id", res)
+		}
+	})
+}
+
+// I-3 — TestOpenTabResolve_RowWithoutID (hallazgo R-2 del review; spec I-3:
+// jamás devolver un id no verificado sin marcar idUnresolved:true).
+//
+// Los seeds de P1–P4 sembraron SIEMPRE id en las filas; R-2 cubre el caso
+// donde la fila de listTabs NO trae `id` (wire background.js:1273-1280 —
+// el campo puede faltar). Dos escenarios:
+//
+//	(a) la fila sin id matchea la URL, PERO hay OTRA fila nueva (id 5) que
+//	    también matchea ⇒ el resolver elige la verificada (5), NUNCA la fila
+//	    sin id (no hay id que afirmar — se puede inventar -1/0/cadena).
+//	(b) la ÚNICA fila que matchea no tiene id ⇒ el resultado es el crudo +
+//	    idUnresolved:true (mismo mapa que P3) — sin id inventado.
+//
+// Misma infraestructura de P1–P4: seqByCommand FIFO (sin id ⇒ cualquier
+// "menor id"/tie-break la elegirá si no verifica), vars DI del resolver
+// (fb024OpenTabFast, cero sleeps reales), oráculo por la superficie MCP.
+func TestOpenTabResolve_RowWithoutID(t *testing.T) {
+	fb024OpenTabFast(t)
+
+	t.Run("sin-id+junto-a-verificada-candidata: gana la VERIFICADA (id=5), sin idUnresolved", func(t *testing.T) {
+		s, hub := newTools(t)
+		hub.seqByCommand = map[string][]any{
+			"listTabs": {
+				[]any{fb024tab(320, "about:blank")},
+				// La fila SIN id sigue a la candidata 5 (mismo URL) — si el
+				// resolver elige última-en-orden O ignore la falta de id,
+				// elegirá la sin-id y afirmaría un id inexistente.
+				[]any{
+					fb024tab(320, "about:blank"),
+					fb024tab(5, "http://x"),           // id numérico, VERIFICADA
+					map[string]any{"url": "http://x"}, // matchea PERO sin id
+				},
+			},
+			"openTab": {map[string]any{"id": float64(325)}},
+		}
+		res := fb024OpenTabResult(t, s)
+		if res["id"] != float64(5) {
+			t.Fatalf("fb-024 R-2 (a): result = %v, want id==5 — el resolver elige el tab nuevo VERIFICADO (id numérico) ante una fila sin id que también matchea http://x (I-3: elegir la fila sin id = afirmar un id que no existe) — RED fb-024-opentab-id", res)
+		}
+		resFlag, present := res["idUnresolved"]
+		if present {
+			if truthy, ok := resFlag.(bool); !ok || truthy {
+				t.Errorf("fb-024 R-2 (a): result = %v — idUnresolved presente con el id VERIFICADO 5; I-3 exige marcar sólo cuando el id no está verificado — RED fb-024-opentab-id", res)
+			}
+		}
+	})
+
+	t.Run("unica-candidata-sin-id: crudo + idUnresolved:true (sin id inventado)", func(t *testing.T) {
+		s, hub := newTools(t)
+		hub.seqByCommand = map[string][]any{
+			"listTabs": {
+				[]any{fb024tab(320, "about:blank")},
+				// Sólo la fila sin-id matchea http://x (321 es otra página
+				// about:blank); ninguna nueva aporta un id verificable ⇒
+				// degradación honesta: crudo + idUnresolved:true.
+				[]any{
+					fb024tab(320, "about:blank"),
+					fb024tab(321, "about:blank"),
+					map[string]any{"url": "http://x"}, // matchea PERO sin id
+				},
+			},
+			"openTab": {map[string]any{"id": float64(325), "url": "http://x"}},
+		}
+		res := fb024OpenTabResult(t, s)
+		want := map[string]any{"id": float64(325), "url": "http://x", "idUnresolved": true}
+		if !reflect.DeepEqual(res, want) {
+			t.Fatalf("fb-024 R-2 (b): result = %v, want EXACTAMENTE el crudo %+v más idUnresolved:true — la única nueva que matchea no trae id (no hay id que afirmar) ⇒ degradación honesta, sin inventar -1/0 (I-3, mapa como P3) — RED fb-024-opentab-id", res, want)
 		}
 	})
 }
