@@ -73,7 +73,7 @@ function emitNavEvent(type, tabId) {
 const isTabNavigating = (tabId) => navigatingTabs.has(tabId);
 
 // fb-020-007 (I-6): núcleo genérico (VulpoNav) y capa ORM (VulpoNavGuard).
-const { watchInjection, routePageProgress, createDiagnosticRing, HEARTBEAT_MS } = globalThis.VulpoNav;
+const { watchInjection, routePageProgress, isExtensionPageSender, createDiagnosticRing, HEARTBEAT_MS } = globalThis.VulpoNav;
 const { dispatchAfterNav, guardInjection, probeTabsGuarded, noResultError } = globalThis.VulpoNavGuard;
 
 // fb-020-008 (act frame fold): módulo del pliegue de lectura en las acciones.
@@ -2393,6 +2393,14 @@ browser.runtime.onMessage.addListener((msg, sender) => {
       dispatch.sendProgress?.(progress);
     });
     return undefined;
+  }
+  // fb-024-onmessage-sender (D-4/D-5): todo otro tipo debe venir de una página
+  // de la extensión (popup/options). Rechazo explícito y sin efecto de estado.
+  if (!isExtensionPageSender(sender, {
+    extensionId: browser.runtime.id,
+    extensionUrlPrefix: browser.runtime.getURL(''),
+  })) {
+    return Promise.resolve({ error: 'forbidden' });
   }
   if (msg.type === 'getStatus') {
     return (async () => {

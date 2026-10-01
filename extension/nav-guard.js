@@ -184,6 +184,23 @@ export function routePageProgress(msg, sender, pendingByToken, send, now = Date.
   send({ type: 'progress', id: dispatch.id, tabId: dispatch.tabId, elapsedMs: now() - dispatch.startedAt });
 }
 
+// fb-024-onmessage-sender (D-2/D-3): mensajes internos sólo desde páginas de
+// la extensión (popup/options). Predicado puro, sin APIs de browser: la
+// identidad llega por parámetro (background.js la deriva de browser.runtime).
+//   verdadero ⇔ sender no nulo
+//             ∧ sender.id === extensionId
+//             ∧ typeof sender.url === 'string'
+//             ∧ sender.url.startsWith(extensionUrlPrefix)
+// Faltante/vacío en cualquier argumento ⇒ falso (fail-closed). No se exige
+// !sender.tab (options puede vivir en una pestaña) ni se usan frameId/envType.
+export function isExtensionPageSender(sender, { extensionId, extensionUrlPrefix } = {}) {
+  if (!sender) return false;
+  if (!extensionId || !extensionUrlPrefix) return false;
+  if (sender.id !== extensionId) return false;
+  if (typeof sender.url !== 'string') return false;
+  return sender.url.startsWith(extensionUrlPrefix);
+}
+
 // §9.6: anillo de diagnóstico en memoria (las entradas más viejas se descartan).
 export function createDiagnosticRing(size = DIAGNOSTIC_RING_SIZE, now = Date.now) {
   const entries = [];

@@ -701,6 +701,8 @@ func startTestPage() (string, func()) {
 		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
 		fmt.Fprint(w, nativeDialogJS)
 	})
+	// fb-024-onmessage-sender: fixture de P2/P3.
+	registerOnmsgRoutes(mux)
 	mux.HandleFunc("/mutate-on", func(w http.ResponseWriter, r *http.Request) {
 		mode := r.URL.Query().Get("mode")
 		switch mode {
@@ -2178,12 +2180,14 @@ func main() {
 	// sobre el boot de FRAME_E2E.
 	navHang := os.Getenv("VLP_NAVHANG")
 	actTimeout := os.Getenv("VLP_ACTTIMEOUT") == "1"
-	frameE2E := os.Getenv("VLP_FRAME_E2E") == "1" || navHang != "" || actTimeout
+	onmsgSender := os.Getenv("VLP_HARNESS_ONMSG") == "1"
+	frameE2E := os.Getenv("VLP_FRAME_E2E") == "1" || navHang != "" || actTimeout || onmsgSender
 	if os.Getenv("VLP_DEV_HARNESS") != "1" && !frameE2E {
 		fmt.Println("dev-harness: opt-in — set VLP_DEV_HARNESS=1 (checks Odoo) or VLP_FRAME_E2E=1 (E2E invalidación) to run.")
 		fmt.Println("  VLP_DEV_HARNESS=1 go run ./cmd/dev-harness")
 		fmt.Println("  VLP_FRAME_E2E=1  go run ./cmd/dev-harness")
 		fmt.Println("  VLP_ACTTIMEOUT=1 go run ./cmd/dev-harness   # P7 fb-024 (act type colgado)")
+		fmt.Println("  VLP_HARNESS_ONMSG=1 go run ./cmd/dev-harness # P2/P3 fb-024-onmessage-sender")
 		os.Exit(0)
 	}
 
@@ -2537,6 +2541,28 @@ func main() {
 		}
 		fmt.Println("act-timeout: FAIL (fb-024 P7)")
 		os.Exit(1)
+	}
+	// fb-024-onmessage-sender P2/P3: VLP_HARNESS_ONMSG=1 corre SOLO ese escenario.
+	if frameE2E && onmsgSender {
+		outcome := onmsgFail
+		if connected {
+			outcome = runOnmsgSenderE2E(serverPort, testPageURL)
+		}
+		fmt.Println("\n=== RESULT ===")
+		cleanup()
+		switch outcome {
+		case onmsgPass:
+			fmt.Println("onmessage-sender: PASS (fb-024 P2/P3)")
+			os.Exit(0)
+		case onmsgVacuo:
+			// V-1: el vector no es alcanzable desde vlp_eval; P2/P3 quedan
+			// escritos y documentados, pero no se acreditan ni se fuerzan.
+			fmt.Println("onmessage-sender: VACUO (fb-024 P2/P3 — V-1: vlp_eval no alcanza runtime.sendMessage; ver deuda fb-024-eval-main-world)")
+			os.Exit(0)
+		default:
+			fmt.Println("onmessage-sender: FAIL (fb-024 P2/P3)")
+			os.Exit(1)
+		}
 	}
 	if frameE2E && navHang != "" {
 		navOK := connected && runNavHangE2E(serverPort, testPageURL, navHang)

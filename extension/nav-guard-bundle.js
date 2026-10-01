@@ -26,6 +26,7 @@ var VulpoNav = (() => {
     ORPHAN_GRACE_MS: () => ORPHAN_GRACE_MS,
     createDiagnosticRing: () => createDiagnosticRing,
     dispatchAfterNav: () => dispatchAfterNav,
+    isExtensionPageSender: () => isExtensionPageSender,
     pageHeartbeat: () => pageHeartbeat,
     routePageProgress: () => routePageProgress,
     watchInjection: () => watchInjection
@@ -175,6 +176,13 @@ var VulpoNav = (() => {
     const dispatch = pendingByToken.get(msg.token);
     if (!dispatch || dispatch.tabId !== sender?.tab?.id) return;
     send({ type: "progress", id: dispatch.id, tabId: dispatch.tabId, elapsedMs: now() - dispatch.startedAt });
+  }
+  function isExtensionPageSender(sender, { extensionId, extensionUrlPrefix } = {}) {
+    if (!sender) return false;
+    if (!extensionId || !extensionUrlPrefix) return false;
+    if (sender.id !== extensionId) return false;
+    if (typeof sender.url !== "string") return false;
+    return sender.url.startsWith(extensionUrlPrefix);
   }
   function createDiagnosticRing(size = DIAGNOSTIC_RING_SIZE, now = Date.now) {
     const entries = [];

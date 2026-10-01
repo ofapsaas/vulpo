@@ -19,6 +19,10 @@ All notable changes to Vulpo are documented here. Format: Keep a Changelog.
 
 ### Fixed
 
+- The extension's internal control messages are now accepted only from the
+  extension's own pages (popup/options). A message sent from a page context is
+  rejected without changing any state. Existing page heartbeats are unaffected.
+
 - `dev-harness` (`VLP_FRAME_E2E`) writes the canonical tokens file, probes the
   build/plan state with the real tab id, and loads the extension from a
   temporary copy with a harness-only background script, so the profile starts
