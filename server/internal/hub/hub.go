@@ -10,10 +10,17 @@
 // "No extension connected for token", "superseded", "extension disconnected",
 // "hub closed".
 //
+// fb-024 (sync perezosa de tabs): ante un comando tab-scoped cuya tab el
+// perfil AÚN no conoce, el hub no rechaza de inmediato: sincroniza las tabs
+// de la extensión de ese token (listTabs, con presupuesto propio
+// tabSyncBudgetMs) y recién re-evalúa. Si tras la sync la tab sigue ausente,
+// el rechazo es byte-idéntico al de siempre (I-2/D-3).
+//
 // Concurrencia: un WS por conexión (WSConn), un goroutine de lectura por
 // conexión; las escrituras vienen de múltiples goroutines (routeCommand) →
 // WSConn debe ser seguro para escritura concurrente (gorilla requiere mutex
-// externo). El Hub mismo se protege con sync.RWMutex.
+// externo). El Hub mismo se protege con sync.RWMutex; Profile.Tabs con su
+// propio mutex (D-8), nunca retenido durante el round-trip de una sync.
 package hub
 
 import (
@@ -51,6 +58,11 @@ type Profile struct {
 	WS    WSConn
 	Tabs  map[string]any
 	Token string
+	// tabsMu (D-8, fb-024): protege Tabs. Se escribe desde la goroutine del WS
+	// (eventos tabCreated/tabUpdated/tabRemoved) y desde la goroutine del caller
+	// (merge de la sync perezosa); se lee en Command. Nunca se retiene durante el
+	// round-trip de la sync (evita deadlock: la respuesta vuelve por handleMessage).
+	tabsMu sync.Mutex
 }
 
 type pendingCmd struct {
@@ -79,6 +91,23 @@ func idleBudgetFromEnv() time.Duration {
 		return defaultIdleBudget
 	}
 	return time.Duration(ms) * time.Millisecond
+}
+
+// Presupuesto propio de la sincronización perezosa de tabs (fb-024 D-2).
+// Independiente de idleBudget: acota SOLO el round-trip de listTabs, de modo
+// que una extensión muda convierte un miss en un rechazo rápido (default
+// 2000 ms, spec §8 Q1) y no en una espera de idleBudget. Inyectable con
+// SetTabSyncBudget; el mutex cubre la lectura desde goroutines de Command.
+var (
+	tabSyncBudgetMu sync.Mutex
+	tabSyncBudgetMs = 2000 * time.Millisecond
+)
+
+// tabSyncBudget: presupuesto efectivo de la sync perezosa.
+func tabSyncBudget() time.Duration {
+	tabSyncBudgetMu.Lock()
+	defer tabSyncBudgetMu.Unlock()
+	return tabSyncBudgetMs
 }
 
 // Hub: estado del hub (profiles/pending) + connections (estado por conexión:
@@ -112,6 +141,14 @@ func (h *Hub) SetIdleBudget(d time.Duration) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.idleBudget = d
+}
+
+// SetTabSyncBudget: inyecta el presupuesto propio de la sync perezosa de tabs
+// (D-2, fb-024). Opcional: los tests lo detectan por type assertion.
+func (h *Hub) SetTabSyncBudget(d time.Duration) {
+	tabSyncBudgetMu.Lock()
+	defer tabSyncBudgetMu.Unlock()
+	tabSyncBudgetMs = d
 }
 
 // SetProductVersion: versión de producto/protocolo que este server implementa;
@@ -275,6 +312,34 @@ func tabIDString(v any) (string, bool) {
 	return "", false
 }
 
+// hasTab: pertenencia a Tabs bajo el mutex del perfil (D-8).
+func (p *Profile) hasTab(tabID string) bool {
+	p.tabsMu.Lock()
+	defer p.tabsMu.Unlock()
+	_, ok := p.Tabs[tabID]
+	return ok
+}
+
+// mergeTabs: incorpora a Tabs las filas devueltas por listTabs, sin borrar
+// entradas (merge, no replace — D-5/I-6: tabRemoved sigue siendo el único
+// camino de borrado). Normaliza el id del wire con tabIDString; las filas sin
+// id válido se descartan.
+func (p *Profile) mergeTabs(rows []any) {
+	p.tabsMu.Lock()
+	defer p.tabsMu.Unlock()
+	for _, rowAny := range rows {
+		row, ok := rowAny.(map[string]any)
+		if !ok {
+			continue
+		}
+		id, ok := tabIDString(row["id"])
+		if !ok {
+			continue
+		}
+		p.Tabs[id] = row
+	}
+}
+
 // handleMessage: forwardStage — despacha event/command/ping/response/error.
 func (h *Hub) handleMessage(p *Profile, msg map[string]any) {
 	switch msg["type"] {
@@ -283,12 +348,16 @@ func (h *Hub) handleMessage(p *Profile, msg map[string]any) {
 		case "tabCreated", "tabUpdated":
 			if tab, ok := msg["tab"].(map[string]any); ok {
 				if id, ok2 := tabIDString(tab["id"]); ok2 {
+					p.tabsMu.Lock()
 					p.Tabs[id] = tab
+					p.tabsMu.Unlock()
 				}
 			}
 		case "tabRemoved":
 			if id, ok := tabIDString(msg["tabId"]); ok {
+				p.tabsMu.Lock()
 				delete(p.Tabs, id)
+				p.tabsMu.Unlock()
 			}
 		}
 	case "command":
@@ -328,8 +397,14 @@ func (h *Hub) handleMessage(p *Profile, msg map[string]any) {
 }
 
 // Command: routeCommand — rutea un comando hacia la extensión del perfil.
-// El tabId se valida SOLO si el caller lo provee (TabID != ""). Resolución por
-// pending[id] con response/error wire.
+// El tabId se valida SOLO si el caller lo provee (TabID != "").
+//
+// Contrato fb-024 (D-1, sync perezosa): si el perfil no conoce la tab pedida
+// (miss), el hub NO rechaza de inmediato; sincroniza las tabs de la extensión
+// de ese token (syncTabs → listTabs) y recién re-evalúa. `p == nil` conserva el
+// rechazo inmediato, sin sync (I-5); una tab ya conocida se despacha sin
+// round-trip extra (fast-path, I-4). Si tras la sync la tab sigue ausente, el
+// rechazo es el de siempre (byte-idéntico, I-2/D-3).
 func (h *Hub) Command(profileID string, cmd Command) (any, error) {
 	h.mu.RLock()
 	p := h.profiles[profileID]
@@ -340,11 +415,63 @@ func (h *Hub) Command(profileID string, cmd Command) (any, error) {
 		if p == nil {
 			return nil, fmt.Errorf("No extension has tab %s", cmd.TabID)
 		}
-		if _, ok := p.Tabs[cmd.TabID]; !ok {
-			return nil, fmt.Errorf("No extension has tab %s", cmd.TabID)
+		if !p.hasTab(cmd.TabID) {
+			h.syncTabs(profileID)
+			q := h.profileFor(profileID)
+			if q == nil || !q.hasTab(cmd.TabID) {
+				return nil, fmt.Errorf("No extension has tab %s", cmd.TabID)
+			}
+			p = q
 		}
 	} else if p == nil {
 		return nil, errors.New("No extension connected for token")
+	}
+
+	return h.dispatch(p, profileID, cmd, h.IdleBudget())
+}
+
+// profileFor: perfil activo del token (nil si no hay extensión conectada).
+func (h *Hub) profileFor(token string) *Profile {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.profiles[token]
+}
+
+// syncTabs: sincroniza (merge, D-5) las tabs que la extensión del perfil
+// reporta vía listTabs. Best-effort: cualquier fallo (timeout, error de la
+// extensión o respuesta no-array) deja Tabs como estaba (D-3) y el caller
+// decide el rechazo. Se despacha con TabID="" (I-7: no puede recursar en el
+// camino de miss) y con el presupuesto propio tabSyncBudget (D-2), no con
+// idleBudget.
+func (h *Hub) syncTabs(profileID string) {
+	p := h.profileFor(profileID)
+	if p == nil {
+		return
+	}
+	res, err := h.dispatch(p, profileID, Command{Command: "listTabs", Params: map[string]any{}}, tabSyncBudget())
+	if err != nil {
+		return
+	}
+	rows, ok := res.([]any)
+	if !ok {
+		return
+	}
+	p.mergeTabs(rows)
+}
+
+// dispatch: envía cmd al perfil p y espera su response/error dentro de budget
+// (+ espera declarada). Reusa el mecanismo pending/heartbeat. El tabId viaja
+// DENTRO de params (la extensión lee params.tabId); se agrega sobre una copia
+// para no mutar el mapa del caller. budget = idleBudget en el camino normal;
+// tabSyncBudget en la sync interna (D-2).
+func (h *Hub) dispatch(p *Profile, profileID string, cmd Command, budget time.Duration) (any, error) {
+	params := cmd.Params
+	if cmd.TabID != "" {
+		params = make(map[string]any, len(cmd.Params)+1)
+		for k, v := range cmd.Params {
+			params[k] = v
+		}
+		params["tabId"] = cmd.TabID
 	}
 
 	resCh := make(chan any, 1)
@@ -358,17 +485,16 @@ func (h *Hub) Command(profileID string, cmd Command) (any, error) {
 	}
 	h.mu.Lock()
 	h.pending[id] = entry
-	idle := h.idleBudget
 	h.mu.Unlock()
-	h.send(p.WS, map[string]any{"type": "command", "command": cmd.Command, "params": cmd.Params, "id": id})
+	h.send(p.WS, map[string]any{"type": "command", "command": cmd.Command, "params": params, "id": id})
 
 	wait := declaredWait(cmd)
-	timer := time.NewTimer(idle + wait)
+	timer := time.NewTimer(budget + wait)
 	defer func() { timer.Stop() }()
-	// D-3 (fb-024): el plazo informado es el que venció — idle + espera
-	// declarada al despachar, idle solo tras un latido (cada latido lo
+	// D-3 (fb-024): el plazo informado es el que venció — budget + espera
+	// declarada al despachar, budget solo tras un latido (cada latido lo
 	// reinicia). `deadline` sigue al timer.
-	deadline := idle + wait
+	deadline := budget + wait
 	for {
 		select {
 		case v := <-resCh:
@@ -377,8 +503,8 @@ func (h *Hub) Command(profileID string, cmd Command) (any, error) {
 			return nil, e
 		case <-entry.heartbeat:
 			timer.Stop()
-			timer = time.NewTimer(idle) // cada latido reinicia el plazo
-			deadline = idle
+			timer = time.NewTimer(budget) // cada latido reinicia el plazo
+			deadline = budget
 		case <-timer.C:
 			if !h.abandonPending(id) {
 				// La respuesta ganó la carrera contra el vencimiento: ya está en camino.
