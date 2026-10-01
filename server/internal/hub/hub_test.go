@@ -275,6 +275,18 @@ func TestTabs_NumericIDs(t *testing.T) {
 		t.Fatalf("tabs = %v, want key \"10\"", p.Tabs)
 	}
 
+	// fb-024 (audit condición 5 / spec §5, ajuste mínimo, NO inevitable):
+	// ninguna aserción contradice D-1 (el test pasaría verde, sólo ~2 s más
+	// lento con el default). Ajuste: inyectar budget corto —vía
+	// tabsyncSetBudget (condición 1: interface-assertion; los tests nunca
+	// nombran tabSyncBudgetMs)— y restaurar el default de producción
+	// (2000 ms, spec §8 Q1) con t.Cleanup para no contaminar a los tests
+	// siguientes. Cero aserciones tocadas: la normalización de ids numéricos
+	// queda idéntica y el comment «path negativo rápido» de abajo conserva su
+	// sentido (latencia, no wire).
+	tabsyncSetBudget(th.h, tabsyncBudget)
+	t.Cleanup(func() { tabsyncSetBudget(th.h, tabsyncBudgetDefault) })
+
 	// Command con tabId NO registrado → error rápido sin bloqueo (path negativo)
 	_, err := th.h.Command("tok1", Command{Command: "screenshot", Params: map[string]any{}, TabID: "999"})
 	if err == nil || !strings.Contains(err.Error(), "No extension has tab") {
@@ -323,18 +335,36 @@ func TestCommand_TabValid(t *testing.T) {
 }
 
 // PC-14 — Command con tabId ajeno → rechazo /No extension has tab/ sin enviar.
+//
+// fb-024 (audit condición 5 / spec §5, Q5) — modificación inevitable: con D-1
+// la sync emite un wire `command` (listTabs, tabless) siempre en el miss ⇒
+// `countType("command")==0` contradice el nuevo contrato con independencia del
+// resultado de la sync; no hay diseño de impl que lo evite (la sync es un wire
+// real a la extensión). Justificación de registro (exacta, test-audit.md):
+// «el invariante de superficie cambia de «ningún command wire» a «ningún wire
+// del comando objetivo»; la sync (listTabs interno, TabID='') es contrato
+// (D-1). Se sustituye la aserción «cero command wires» por «cero wires con
+// command=='getDOM'» (más específica, misma protección de ownership/anti-
+// probing D-6) y se conserva el match /No extension has tab/ byte-idéntico
+// (I-2). Ninguna aserción se debilita: una se sustituye por una más precisa.»
+// Además: budget corto inyectado (condición 1) para que el rechazo siga siendo
+// rápido sin responder el fake.
 func TestCommand_TabForeign(t *testing.T) {
 	th := newTestHub(t)
 	ws := &fakeWS{}
 	th.register(t, ws, "tok1")
 	th.h.HandleMessage(ws, []byte(`{"type":"event","event":"tabCreated","tab":{"id":"tabA","url":"http://x"}}`))
+	tabsyncSetBudget(th.h, tabsyncBudget) // rechazo rápido sin responder el fake
+	t.Cleanup(func() { tabsyncSetBudget(th.h, tabsyncBudgetDefault) })
 
 	_, err := th.h.Command("tok1", Command{Command: "getDOM", Params: map[string]any{}, TabID: "other"})
 	if err == nil || !strings.Contains(err.Error(), "No extension has tab") {
 		t.Fatalf("err = %v, want /No extension has tab/", err)
 	}
-	if ws.countType("command") != 0 {
-		t.Fatalf("command wire enviado pese al rechazo: %v", ws.messages())
+	// aserción sustituida (más específica, misma protección D-6): cero wires
+	// del COMANDO OBJETIVO — la sync (listTabs interno) es contrato (D-1).
+	if n := tabsyncCountCommand(ws, "getDOM"); n != 0 {
+		t.Fatalf("wire del comando objetivo enviado pese al rechazo: %v", ws.messages())
 	}
 }
 
