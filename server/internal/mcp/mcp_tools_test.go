@@ -39,6 +39,17 @@ type MockHub struct {
 	// Nil → comportamiento previo (byCommand/result). errByCommand sigue
 	// ganando (P6: Detect que falla).
 	detectByToken map[string][]map[string]any
+	// seqByCommand (fb-024-opentab-id, test-audit §3/§4 — EXTENSIÓN aditiva,
+	// no modificación): cola FIFO de resultados POR command para los seeds
+	// de secuencia del resolver de openTab (snapshot before + polls). Cuando
+	// la cola se agota, el ÚLTIMO elemento queda sticky (se devuelve en cada
+	// llamada siguiente — P3/P4: cada poll vuelve a devolver el mismo
+	// [] / redirect-set sin consumir más). Prioridad: errByCommand gana sobre
+	// todo (P9 atomicidad); seqByCommand gana sobre byCommand para ese
+	// command. El fallback plano (result/err) y los seeds preexistentes
+	// (byCommand/errByCommand/detectByToken) quedan intactos — los tests
+	// previos no cambian en uno solo.
+	seqByCommand map[string][]any
 }
 
 func (m *MockHub) Command(profileID string, cmd Command) (any, error) {
@@ -56,6 +67,16 @@ func (m *MockHub) Command(profileID string, cmd Command) (any, error) {
 			return tabs, nil
 		}
 		return []map[string]any{}, nil
+	}
+	// seqByCommand (fb-024-opentab-id): FIFO con cola sticky — antes de
+	// byCommand (prioridad seeded-sequence > seeded-static); tras
+	// errByCommand (P9: un command sembrado para fallar, falla).
+	if seq, ok := m.seqByCommand[cmd.Command]; ok && len(seq) > 0 {
+		res := seq[0]
+		if len(seq) > 1 {
+			m.seqByCommand[cmd.Command] = seq[1:]
+		}
+		return res, nil
 	}
 	if res, ok := m.byCommand[cmd.Command]; ok {
 		return res, nil

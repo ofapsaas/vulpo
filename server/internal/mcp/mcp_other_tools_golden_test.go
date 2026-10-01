@@ -131,6 +131,9 @@ func TestOtherToolsGolden(t *testing.T) {
 		if tt.name == "vlp_screenshot" {
 			continue // the tool whose wire shape this cycle changes — excluded from the golden
 		}
+		if tt.name == "vlp_openTab" {
+			t.Skip("excluida del golden de reenvío tal cual — spec fb-024-opentab-id Enmienda 1 (D-1/D-2): el contrato deja de ser reenvío (resolución post-create); salida anclada en opentab_resolve_test.go P1–P4, precedente vlp_screenshot")
+		}
 		t.Run(tt.name, func(t *testing.T) {
 			hub := &MockHub{}
 			reg := odooregistry.New()
