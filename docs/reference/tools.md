@@ -172,7 +172,7 @@ Navigate a browser tab to a specified URL. Without frame, returns {success:true,
 
 ### `vlp_openTab`
 
-Open a new browser tab with the specified URL.
+Open a new browser tab with the specified URL and return its tab: `id` is the id of the tab that holds the URL (resolved via listTabs after create), not the raw browser.tabs.create id. If the tab cannot be resolved within 5 s, the result carries `idUnresolved:true` and the raw create result (never an unverified id).
 
 | Param | Type | Required |
 |---|---|---|

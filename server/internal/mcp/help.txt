@@ -18,6 +18,10 @@ active Odoo tab they return an error.
 ## Families
 
 - **vlp_listTabs / getCurrentTab / openTab / closeTab**: tab management.
+  `vlp_openTab` returns the `id` of the tab that holds the requested URL
+  (resolved via `listTabs` after create, not the raw `browser.tabs.create`
+  id); if it cannot be resolved within 5 s the result carries
+  `idUnresolved:true` with the raw create result.
 - **vlp_activateTab / getDOM / eval / navigate / click / injectCSS /
   highlight / screenshot / getCookies / goBack / goForward / fill /
   waitForElement / axSnapshot**: operations on the active tab.

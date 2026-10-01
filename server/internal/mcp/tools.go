@@ -327,7 +327,11 @@ func RegisterAllTools(s *Server, hub Hub, helpFile string, odoo *odooregistry.Re
 	})
 
 	s.RegisterTool(Tool{
-		Name: "vlp_openTab", Description: "Open a new browser tab with the specified URL.",
+		// fb-024-opentab-id (D-1/D-2): el `id` devuelto es el de la pestaña que
+		// carga la URL (resuelto con listTabs post-create), no el id crudo de
+		// browser.tabs.create (desfasado +1 en Firefox real). Si no se resuelve
+		// dentro de T, el objeto crudo va marcado `idUnresolved:true`.
+		Name: "vlp_openTab", Description: "Open a new browser tab with the specified URL and return its tab: `id` is the id of the tab that holds the URL (resolved via listTabs after create), not the raw browser.tabs.create id. If the tab cannot be resolved within 5 s, the result carries `idUnresolved:true` and the raw create result (never an unverified id).",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -336,7 +340,7 @@ func RegisterAllTools(s *Server, hub Hub, helpFile string, odoo *odooregistry.Re
 			"required": []any{"url"},
 		},
 		Handler: func(params map[string]any, token string) (any, error) {
-			return hub.Command(token, Command{Command: "openTab", Params: map[string]any{"url": strArg(params, "url")}})
+			return resolveOpenTab(hub, token, strArg(params, "url"))
 		},
 	})
 
