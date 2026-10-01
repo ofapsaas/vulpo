@@ -56,6 +56,13 @@ const harnessBuildJS = `// harness-build.js — fb-024-harness-headless (D-3).
   var baseGetOrCreateProfile = getOrCreateProfile;
   getOrCreateProfile = function (profileId, bridgeUrl, token) {
     var profile = baseGetOrCreateProfile(profileId, bridgeUrl, token);
+    // A PROPÓSITO: reaplica planMode=false en CADA llamada a
+    // getOrCreateProfile, no sólo al crear el perfil. background.js vuelve a
+    // pedir el perfil al recargar la config (getOrCreateProfile), y el
+    // harness necesita que ese perfil también quede en Build: por eso el
+    // wrapper reescribe el flag en cada retorno, pisando un toggle a Plan
+    // dentro de la copia. Todo queda confinado a la copia del harness (I-2);
+    // el producto (background.js) no se toca.
     if (profile && profile.planMode !== false) {
       profile.planMode = false;
     }

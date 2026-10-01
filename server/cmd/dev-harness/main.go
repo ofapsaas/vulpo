@@ -32,6 +32,8 @@
 //	                     hace fail-fast (P7).
 //	VLP_HARNESS_DIR      base del directorio temporal de la copia de la
 //	                     extensión (default os.TempDir(); cleanup lo borra).
+//	                     Debe quedar FUERA del repo: una base dentro de la
+//	                     raíz del repo se rechaza con [FAIL] (fb-024 #4a).
 //	VLP_HARNESS_BADTOKEN=1 escribe en el archivo de tokens un token ajeno al
 //	                     harness (selector de prueba P10: fuerza el fail-fast 401).
 //
@@ -55,9 +57,11 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -2128,6 +2132,40 @@ func runNativeDialogE2E(port int, pageURL string) bool {
 	return okA && okB && okC
 }
 
+// harnessDirInsideRepo (fb-024 #4a): true si base —absoluta, limpia y con
+// symlinks resueltos cuando es posible— es repoRoot o queda dentro. Guarda de
+// la copia del harness (D-3): debe vivir FUERA del repo (I-2). base vacía
+// (default os.TempDir) nunca está dentro del repo.
+func harnessDirInsideRepo(base, repoRoot string) bool {
+	if base == "" {
+		return false
+	}
+	abs, ok := resolveAbsPath(base)
+	if !ok {
+		return false
+	}
+	root, ok := resolveAbsPath(repoRoot)
+	if !ok {
+		return false
+	}
+	return abs == root || strings.HasPrefix(abs, root+string(filepath.Separator))
+}
+
+// resolveAbsPath: filepath.Abs + Clean y, si el path existe, EvalSymlinks
+// (resuelve una base que entra al repo por un symlink). Si no existe todavía
+// (MkdirTemp lo crea), se queda con la ruta absoluta limpia.
+func resolveAbsPath(p string) (string, bool) {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", false
+	}
+	abs = filepath.Clean(abs)
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = filepath.Clean(resolved)
+	}
+	return abs, true
+}
+
 func main() {
 	// PC6 — opt-in: sin VLP_DEV_HARNESS=1 ni VLP_FRAME_E2E=1,
 	// hint + exit 0.
@@ -2228,23 +2266,56 @@ func main() {
 	var harnessExtDir string // copia temporal de la extensión (D-3)
 	// cleanup: mata server + web-ext y borra archivos temporales. Se llama
 	// EXPLÍCITAMENTE antes de os.Exit (os.Exit NO ejecuta defers en Go).
+	// Idempotente (sync.Once): la última sección, un fail-fast y el handler
+	// de señales pueden invocarlo más de una vez; la primera gana.
+	var cleanupOnce sync.Once
 	cleanup := func() {
-		if webextLaunched && webextCmd != nil && webextCmd.Process != nil {
-			syscall.Kill(-webextCmd.Process.Pid, syscall.SIGKILL)
-			webextCmd.Process.Kill()
+		cleanupOnce.Do(func() {
+			if webextLaunched && webextCmd != nil && webextCmd.Process != nil {
+				syscall.Kill(-webextCmd.Process.Pid, syscall.SIGKILL)
+				webextCmd.Process.Kill()
+			}
+			if srvCmd != nil && srvCmd.Process != nil {
+				srvCmd.Process.Kill()
+			}
+			closeTestPage()
+			os.RemoveAll(profileDir)
+			os.RemoveAll(tokensFile)
+			// D-3/P11: la copia temporal y el touch legacy (de corridas previas en
+			// las que el marker vivía en el source dir) no sobreviven.
+			if harnessExtDir != "" {
+				os.RemoveAll(harnessExtDir)
+			}
+			os.Remove(filepath.Join(extDir, ".harness-touch"))
+		})
+	}
+
+	// fb-024 #4b: SIGINT/SIGTERM (Ctrl-C, kill) corren el MISMO cleanup y salen
+	// con código ≠ 0. Sin esto, os.Exit del proceso se lleva la copia temporal
+	// (D-3), el perfil y el archivo de tokens, y un build posterior podría
+	// empaquetar la copia (I-2).
+	sigC := make(chan os.Signal, 1)
+	signal.Notify(sigC, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-sigC
+		code := 1
+		if s, ok := sig.(syscall.Signal); ok {
+			code = 128 + int(s)
 		}
-		if srvCmd != nil && srvCmd.Process != nil {
-			srvCmd.Process.Kill()
+		fmt.Printf("\n  [FAIL] interrupted by %v — cleanup\n", sig)
+		cleanup()
+		os.Exit(code)
+	}()
+
+	// fb-024 #4a: la copia (D-3) debe quedar FUERA del repo (I-2). Si
+	// VLP_HARNESS_DIR apunta dentro de la raíz del repo, falla cerrado ANTES
+	// de copiar/perfilar/lanzar nada.
+	if frameE2E {
+		if base := os.Getenv("VLP_HARNESS_DIR"); harnessDirInsideRepo(base, repoRoot) {
+			fmt.Printf("  [FAIL] precondition: VLP_HARNESS_DIR must be outside the repository (%s is inside %s)\n", base, repoRoot)
+			cleanup()
+			os.Exit(1)
 		}
-		closeTestPage()
-		os.RemoveAll(profileDir)
-		os.RemoveAll(tokensFile)
-		// D-3/P11: la copia temporal y el touch legacy (de corridas previas en
-		// las que el marker vivía en el source dir) no sobreviven.
-		if harnessExtDir != "" {
-			os.RemoveAll(harnessExtDir)
-		}
-		os.Remove(filepath.Join(extDir, ".harness-touch"))
 	}
 
 	// fb-018-006 (3.5 E2E): el gate FRAME_E2E reconstruye server + bundle
