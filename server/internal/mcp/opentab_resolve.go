@@ -32,10 +32,12 @@ var openTabTimeoutMs = 5000
 // openTabNotFound: el tab nuevo que carga la URL no se pudo resolver dentro de T.
 const openTabNotFound = -1
 
-// tabSnapshot: fila normalizada de listTabs ({id,url} del wire de la extensión).
+// tabSnapshot: fila normalizada de listTabs ({id,url,title} del wire de la
+// extensión — D-1: el resultado resuelto expone los tres campos).
 type tabSnapshot struct {
-	id  int // -1 si el wire no trae un id utilizable
-	url string
+	id    int // -1 si el wire no trae un id utilizable
+	url   string
+	title string
 }
 
 // resolveOpenTab: snapshot before → dispatch openTab → poll hasta T → tab nuevo
@@ -89,7 +91,7 @@ func listTabSnapshots(hub Hub, token string) ([]tabSnapshot, bool) {
 	return tabsFromWire(res)
 }
 
-// tabsFromWire: normaliza el resultado de listTabs (array JSON de {id,url}).
+// tabsFromWire: normaliza el resultado de listTabs (array JSON de {id,url,title}).
 // Una respuesta no parseable (string, null, objeto, number) → ok=false: el
 // resolver degrada con idUnresolved en vez de fabricar un match.
 func tabsFromWire(res any) ([]tabSnapshot, bool) {
@@ -106,7 +108,11 @@ func tabsFromWire(res any) ([]tabSnapshot, bool) {
 	}
 	out := make([]tabSnapshot, 0, len(wire))
 	for _, t := range wire {
-		out = append(out, tabSnapshot{id: idFromWire(t["id"]), url: urlFromWire(t["url"])})
+		out = append(out, tabSnapshot{
+			id:    idFromWire(t["id"]),
+			url:   urlFromWire(t["url"]),
+			title: titleFromWire(t["title"]),
+		})
 	}
 	return out, true
 }
@@ -133,6 +139,14 @@ func urlFromWire(v any) string {
 	return ""
 }
 
+// titleFromWire: title del wire; ausente → "" (D-1: el campo viaja al resultado).
+func titleFromWire(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
+
 // idSet: conjunto de ids presentes (snapshot before — D-1 `id ∉ before`).
 func idSet(tabs []tabSnapshot) map[int]bool {
 	out := make(map[int]bool, len(tabs))
@@ -149,9 +163,17 @@ func idSet(tabs []tabSnapshot) map[int]bool {
 // agrega path/query); (3) |nuevos|==1 → ese (redirect a otra URL) — condición
 // necesaria, no suficiente: con ≥2 nuevos sin match NO se elige arbitrariamente.
 // Empate de exactos → menor id.
+//
+// R-2/I-3: una fila sin id numérico (sentinela `-1` del parseo) NUNCA cuenta
+// como nueva, nunca se devuelve como id y nunca compite en el desempate. Pero
+// si una fila sin id matchea la URL, hay match sin id verificable: el fallback
+// "único tab nuevo" queda bloqueado y se degrada — no se fabrica un id.
 func pickNewTab(tabs []tabSnapshot, beforeIDs map[int]bool, url string) (tabSnapshot, bool) {
 	var nuevos []tabSnapshot
 	for _, t := range tabs {
+		if t.id == openTabNotFound {
+			continue // R-2: fila sin id — ni nueva ni candidata al desempate
+		}
 		if !beforeIDs[t.id] {
 			nuevos = append(nuevos, t)
 		}
@@ -160,14 +182,35 @@ func pickNewTab(tabs []tabSnapshot, beforeIDs map[int]bool, url string) (tabSnap
 		return t, true
 	}
 	if t, ok := lowestByID(matching(nuevos, func(t tabSnapshot) bool {
-		return url != "" && len(t.url) > len(url) && t.url[:len(url)] == url
+		return urlPrefixMatch(t.url, url)
 	})); ok {
 		return t, true
+	}
+	if anyUnidentifiedURLMatch(tabs, url) {
+		return tabSnapshot{}, false
 	}
 	if len(nuevos) == 1 {
 		return nuevos[0], true
 	}
 	return tabSnapshot{}, false
+}
+
+// urlPrefixMatch: `candidate` es la URL pedida con path/query agregado (match
+// por prefijo, D-5). `url` vacía nunca matchea (no se inventa un prefijo).
+func urlPrefixMatch(candidate, url string) bool {
+	return url != "" && len(candidate) > len(url) && candidate[:len(url)] == url
+}
+
+// anyUnidentifiedURLMatch: alguna fila sin id numérico matchea la URL pedida
+// (exacto o prefijo). Bloquea el fallback "único tab nuevo": existe un match
+// pero sin id verificable ⇒ degradación honesta (R-2/I-3).
+func anyUnidentifiedURLMatch(tabs []tabSnapshot, url string) bool {
+	for _, t := range tabs {
+		if t.id == openTabNotFound && (t.url == url || urlPrefixMatch(t.url, url)) {
+			return true
+		}
+	}
+	return false
 }
 
 // matching: subconjunto que cumple el predicado (conserva el orden de entrada).
@@ -195,9 +238,10 @@ func lowestByID(tabs []tabSnapshot) (tabSnapshot, bool) {
 	return best, true
 }
 
-// tabResult: el objeto de la tool para un tab resuelto ({id,url} verificados).
+// tabResult: el objeto de la tool para un tab resuelto ({id,url,title}
+// verificados — D-1).
 func tabResult(t tabSnapshot) map[string]any {
-	return map[string]any{"id": t.id, "url": t.url}
+	return map[string]any{"id": t.id, "url": t.url, "title": t.title}
 }
 
 // markUnresolved: raw + idUnresolved:true (D-2/I-3). El raw se copia (nunca se
