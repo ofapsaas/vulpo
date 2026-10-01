@@ -19,6 +19,13 @@ All notable changes to Vulpo are documented here. Format: Keep a Changelog.
 
 ### Fixed
 
+- `vlp_eval` now runs the agent's JavaScript in the page's own (MAIN) world
+  instead of the content-script world: it works on pages whose CSP permits
+  `eval`, and on a page with a strict CSP it fails honestly with the page's
+  `call to eval() blocked by CSP` error without running anything. The executed
+  code no longer has access to extension APIs (`browser.runtime`,
+  `browser.storage`). Its tool description now states all of this.
+
 - The extension's internal control messages are now accepted only from the
   extension's own pages (popup/options). A message sent from a page context is
   rejected without changing any state. Existing page heartbeats are unaffected.

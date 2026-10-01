@@ -1297,6 +1297,12 @@ const handlers = {
 
     const results = await browser.scripting.executeScript({
       target: { tabId },
+      // fb-024-eval-main-world (D-1): el eval corre en el mundo de la PÁGINA
+      // (MAIN). El código del agente no tiene APIs de extensión
+      // (browser.runtime/browser.storage ausentes); la CSP de la página
+      // gobierna el eval y lo bloquea en páginas estrictas (error, sin
+      // ejecutar). El retorno stringificado y el contrato de error no cambian.
+      world: 'MAIN',
       func: (agentCode) => {
         // Devuelve un objeto con { result, error } para que el host
         // pueda distinguir entre errores de ejecución reales y

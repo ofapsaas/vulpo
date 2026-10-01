@@ -168,7 +168,7 @@ func RegisterAllTools(s *Server, hub Hub, helpFile string, odoo *odooregistry.Re
 	})
 
 	s.RegisterTool(Tool{
-		Name: "vlp_eval", Description: "Execute JavaScript code in a browser tab's MAIN world context. It does not check for a pending native dialog (nativeDialog): do not use it to get around a vlp_act or vlp_fill rejection with nativeDialog.",
+		Name: "vlp_eval", Description: "Execute JavaScript code in a browser tab's page (MAIN) world — the site's own context. It has no extension APIs: browser.runtime and browser.storage are absent, so the code cannot reach the extension. The page's Content-Security-Policy governs the eval: on a page with a strict CSP (no 'unsafe-eval') it returns an error containing \"call to eval() blocked by CSP\" and nothing runs, and the page can read or interfere with the code. It does not check for a pending native dialog (nativeDialog): do not use it to get around a vlp_act or vlp_fill rejection with nativeDialog.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

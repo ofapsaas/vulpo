@@ -250,7 +250,7 @@ func runOnmsgSenderE2E(port int, pageURL string) onmsgOutcome {
 	if !reachable {
 		fmt.Printf("  [VACUO] ONMSG-V1: el vector NO es alcanzable desde vlp_eval — P2/P3 quedan escritos pero el flip pre-arreglo no se puede observar\n")
 		fmt.Printf("  [VACUO] V-1 evidencia: %s\n", detail)
-		fmt.Printf("  [VACUO] Consecuencia: el gate de sender (D-4/D-5) cierra el canal, pero hoy ningun script de pagina alcanza runtime.sendMessage (vlp_eval muerto por CSP). Deuda: fb-024-eval-main-world.\n")
+		fmt.Printf("  [VACUO] Consecuencia: el gate de sender (D-4/D-5) cierra el canal; con fb-024-eval-main-world el codigo corre en el mundo de la pagina sin APIs de extension (browser.runtime ausente), asi que ningun script de pagina alcanza runtime.sendMessage por construccion. La cobertura live del gate queda como deuda (P2': dispatch via executeScript({func})).\n")
 		return onmsgVacuo
 	}
 	fmt.Printf("  [NOTE] ONMSG-V1: vector alcanzable; respuesta del mensaje = %q (%s)\n", rb, detail)

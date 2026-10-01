@@ -504,8 +504,8 @@ Sources of truth, in order of preference:
    image-boundary rule in §3b: the main agent never captures or reads
    images; it delegates the looking and gets one line back), for what the
    contract does not cover yet (see limitations below).
-   (`eval` is still not an escape hatch: sites with a strict CSP — Odoo among
-   them — block it.)
+   (`vlp_eval` runs in the page's MAIN world, so the page's CSP governs the
+   `eval`: a strict CSP — Odoo among them — blocks it. Not an escape hatch.)
 
 ### Limitations still open (not resolved by fb-018-002)
 
