@@ -75,6 +75,13 @@
 // resultado vacuo con un PASS; la línea impresa ya lo distingue ("VACUO" vs
 // "PASS").
 //
+// Selector de fb-024-eval-main-world (T2 P1/P2/P3a):
+//
+// VLP_EVALMAIN=1 corre SOLO los pasos de `vlp_eval` en el mundo de la página
+// (patrón VLP_ACTTIMEOUT): P1 (ejecuta sobre `/`), P2 (CSP estricta: error CSP
+// + efecto ausente, anti-vacuo) y P3a (sin APIs de extensión). P3b se re-corre
+// con su selector propio VLP_HARNESS_ONMSG=1.
+//
 // Nota: se usa web-ext (herramienta oficial de Mozilla) porque carga el addon
 // como TEMPORARY ADD-ON, que es el mecanismo que activa el service worker MV3.
 // El launcher Camoufox (camoufox-with-addon.mjs) instala el addon manualmente
@@ -2540,13 +2547,15 @@ func main() {
 	navHang := os.Getenv("VLP_NAVHANG")
 	actTimeout := os.Getenv("VLP_ACTTIMEOUT") == "1"
 	onmsgSender := os.Getenv("VLP_HARNESS_ONMSG") == "1"
-	frameE2E := os.Getenv("VLP_FRAME_E2E") == "1" || navHang != "" || actTimeout || onmsgSender
+	evalMain := os.Getenv("VLP_EVALMAIN") == "1"
+	frameE2E := os.Getenv("VLP_FRAME_E2E") == "1" || navHang != "" || actTimeout || onmsgSender || evalMain
 	if os.Getenv("VLP_DEV_HARNESS") != "1" && !frameE2E {
 		fmt.Println("dev-harness: opt-in — set VLP_DEV_HARNESS=1 (checks Odoo) or VLP_FRAME_E2E=1 (E2E invalidación) to run.")
 		fmt.Println("  VLP_DEV_HARNESS=1 go run ./cmd/dev-harness")
 		fmt.Println("  VLP_FRAME_E2E=1  go run ./cmd/dev-harness")
 		fmt.Println("  VLP_ACTTIMEOUT=1 go run ./cmd/dev-harness   # P7 fb-024 (act type colgado)")
 		fmt.Println("  VLP_HARNESS_ONMSG=1 go run ./cmd/dev-harness # P2/P3 fb-024-onmessage-sender")
+		fmt.Println("  VLP_EVALMAIN=1 go run ./cmd/dev-harness   # P1/P2/P3a fb-024-eval-main-world")
 		os.Exit(0)
 	}
 
@@ -2923,6 +2932,18 @@ func main() {
 			fmt.Println("onmessage-sender: FAIL (fb-024 P2/P3)")
 			os.Exit(1)
 		}
+	}
+	// fb-024-eval-main-world P1/P2/P3a: VLP_EVALMAIN=1 corre SOLO ese escenario.
+	if frameE2E && evalMain {
+		emOK := connected && runEvalMainWorldE2E(serverPort, testPageURL)
+		fmt.Println("\n=== RESULT ===")
+		cleanup()
+		if emOK {
+			fmt.Println("eval-main-world: PASS (fb-024 P1/P2/P3a)")
+			os.Exit(0)
+		}
+		fmt.Println("eval-main-world: FAIL (fb-024 P1/P2/P3a)")
+		os.Exit(1)
 	}
 	if frameE2E && navHang != "" {
 		navOK := connected && runNavHangE2E(serverPort, testPageURL, navHang)
