@@ -6,6 +6,32 @@ for tabs, DOM, safe actions and Odoo sessions.
 
 https://addons.mozilla.org/firefox/addon/vulpo-mcp-browser-bridge/
 
+## Problems Vulpo solves
+
+1. **Real, logged-in sessions.** Agents drive your actual Firefox and its
+   already-open sessions — no API, no separate headless browser, no
+   credentials handed over.
+2. **The raw DOM does not fit an LLM.** Vulpo serializes a compact, paginated
+   *frame* of stable, re-queryable refs (invalidated only when the DOM
+   changes) instead of dumping HTML.
+3. **Agents act blind.** `vlp_act` reports honestly whether an action took
+   effect (detects disabled controls), observes the value written, waits for
+   the page to settle, and surfaces native dialogs — no false "ok".
+4. **Odoo without API keys.** 12 Odoo tools (models, fields, search/export,
+   create/write/unlink) run on the browser session; they work on Odoo Online,
+   where no key or network access is available.
+5. **Browser control without giving away the keys.** The server is local by
+   default, one token = one tenant = one browser, tenants are isolated, and
+   the token is handled by `vlpmcp`/onboarding — never passed as an argument
+   to the agent nor printed.
+
+**Local or remote, either way.** The server can run on your own machine or on
+a server. Hosted remotely, your local Firefox extension points its `bridgeUrl`
+at it and remote agents reach the same MCP endpoint — so a remote agent can
+drive your local browser. Run it locally and the same endpoint serves local
+agents (and remote ones too, if you expose it over VPN/LAN). See
+[Security](docs/security.md) before binding beyond loopback.
+
 ## Components
 
 | Component | What it is |
