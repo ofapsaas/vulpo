@@ -96,4 +96,4 @@ cd extension/odoo && node --test *.test.js
 
 ## License
 
-GPL-3.0-or-later. Copyright 2026 Vulpo contributors.
+GPL-3.0-or-later. Copyright 2026 Ofap.
