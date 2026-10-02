@@ -4,6 +4,8 @@
 connected over WebSocket to a Go server, with MCP tools (Streamable HTTP)
 for tabs, DOM, safe actions and Odoo sessions.
 
+https://addons.mozilla.org/firefox/addon/vulpo-mcp-browser-bridge/
+
 ## Components
 
 | Component | What it is |
