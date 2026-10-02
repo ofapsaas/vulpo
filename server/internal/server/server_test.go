@@ -168,8 +168,8 @@ func TestMCP_Initialize(t *testing.T) {
 	}
 	result, _ := resp["result"].(map[string]any)
 	si, _ := result["serverInfo"].(map[string]any)
-	if si["name"] != "vulpo" || si["version"] != "0.5.3" {
-		t.Fatalf("serverInfo = %v, want vulpo 0.5.3", si)
+	if si["name"] != "vulpo" || si["version"] != "0.5.4" {
+		t.Fatalf("serverInfo = %v, want vulpo 0.5.4", si)
 	}
 	if pv, _ := result["protocolVersion"].(string); pv != "2025-06-18" {
 		t.Fatalf("protocolVersion = %v, want 2025-06-18", pv)

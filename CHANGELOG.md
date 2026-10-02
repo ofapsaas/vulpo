@@ -2,7 +2,7 @@
 
 All notable changes to Vulpo are documented here. Format: Keep a Changelog.
 
-## [Unreleased]
+## [0.5.4] — 2026-10-01
 
 ### Changed
 
