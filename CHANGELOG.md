@@ -2,6 +2,29 @@
 
 All notable changes to Vulpo are documented here. Format: Keep a Changelog.
 
+## [0.5.5] — 2026-10-05
+
+### Added
+
+- **`vlp-odoosh-proxy`**, a new component of the agent kit: an HTTP proxy that
+  connects [`odoosh-mcp`](https://pypi.org/project/odoosh-mcp-server/) — an
+  independent, MIT-licensed upstream project by Hugo Adan Oliva — to an
+  authenticated `odoo.sh` tab through Vulpo. It replaces the direct egress from
+  `odoosh-mcp` to `odoo.sh` and runs each control-plane request as a synchronous
+  `vlp_eval` inside the tab, so the browser attaches the session cookie and no
+  file holds it. The kit ships the static binary, the systemd user unit and the
+  documentation (`docs/odoosh-proxy.md`). The proxy is a transparent
+  pass-through: the write ceiling lives on the `odoosh-mcp` side.
+
+- **`actionable` on table cells** (`vlp_getFrame`): a control inside a table
+  cell now inherits its row, and a simple table resolves the column header, so
+  an agent can tell which row a control belongs to before acting on it.
+
+### Changed
+
+- The Odoo web skill (`vulpo-odoo-web`) line-loading recipe was rewritten with
+  a closed set of steps, the real role, and modal handling.
+
 ## [0.5.4] — 2026-10-01
 
 ### Changed

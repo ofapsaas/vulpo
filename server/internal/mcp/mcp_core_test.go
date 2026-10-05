@@ -45,8 +45,8 @@ func TestInitialize(t *testing.T) {
 		t.Fatalf("protocolVersion = %v", res["protocolVersion"])
 	}
 	si := res["serverInfo"].(map[string]any)
-	if si["name"] != "vulpo" || si["version"] != "0.5.4" {
-		t.Fatalf("serverInfo = %v, want vulpo 0.5.4", si)
+	if si["name"] != "vulpo" || si["version"] != "0.5.5" {
+		t.Fatalf("serverInfo = %v, want vulpo 0.5.5", si)
 	}
 	if _, ok := res["capabilities"].(map[string]any)["tools"]; !ok {
 		t.Fatal("capabilities.tools faltante")
