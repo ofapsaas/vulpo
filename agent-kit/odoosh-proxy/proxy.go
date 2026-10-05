@@ -132,16 +132,24 @@ func (p *proxy) resolveTab() (int, error) {
 	if err != nil || rpcErr != nil {
 		return 0, errors.New("cannot list Vulpo tabs")
 	}
-	var listing struct {
-		Tabs []struct {
-			ID  int    `json:"id"`
-			URL string `json:"url"`
-		} `json:"tabs"`
+	// The real vlp_listTabs wire is a BARE JSON array of tab objects in
+	// content[0].text (spec §3.7, Enmienda 1). The object shape
+	// {"tabs":[…]} is accepted too for robustness.
+	type tabInfo struct {
+		ID  int    `json:"id"`
+		URL string `json:"url"`
 	}
-	if err := json.Unmarshal([]byte(text), &listing); err != nil {
-		return 0, errors.New("cannot list Vulpo tabs")
+	var tabs []tabInfo
+	if err := json.Unmarshal([]byte(text), &tabs); err != nil {
+		var listing struct {
+			Tabs []tabInfo `json:"tabs"`
+		}
+		if err := json.Unmarshal([]byte(text), &listing); err != nil {
+			return 0, errors.New("cannot list Vulpo tabs")
+		}
+		tabs = listing.Tabs
 	}
-	for _, tab := range listing.Tabs {
+	for _, tab := range tabs {
 		if strings.HasPrefix(tab.URL, p.cfg.tabPrefix) {
 			return tab.ID, nil
 		}
