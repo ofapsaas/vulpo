@@ -501,13 +501,11 @@ func (p *proxy) logRequest(r *http.Request, path string) {
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {
-	// The documented error body is {"error":"<msg>"} and the raw tool message
-	// must be preserved VERBATIM as a substring (spec §3.5.1/C-10). The
-	// template is therefore filled literally: re-encoding would escape the
-	// quotes a raw message may carry (e.g. Plan mode) and break preservation.
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_, _ = io.WriteString(w, `{"error":"`+msg+`"}`+"\n")
+	// The error body is ALWAYS valid JSON ({"error":"<msg>"}), exactly as in
+	// 001 (spec §3.5/D-12, amended §3.5.1). A raw message carrying quotes
+	// (e.g. Plan mode) is JSON-escaped; the raw is compared on the decoded
+	// `error` field, not on the raw bytes.
+	writeJSON(w, status, map[string]string{"error": msg})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
