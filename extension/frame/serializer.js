@@ -337,6 +337,18 @@ function isCellLike(el) {
   return role === 'cell' || role === 'gridcell';
 }
 
+// fb-023-004 D-2/I-3 — ¿la celda de la lista responde al click? ÚNICA fuente
+// del discriminante: cell-like + cursor COMPUTADO `pointer` (la misma API de
+// presentación que usa `computeClickablePromotions`). No depende de la query
+// ni de clases de Odoo (`o_field_cell`/`cursor-pointer` no entran al núcleo);
+// en una lista editable el click entra en edición, en una de sólo lectura abre
+// el registro — en ambos casos la señal es la misma (accionabilidad, no
+// editabilidad, D-1/D-7a).
+function isActionableCell(el, win) {
+  if (!isCellLike(el)) return false;
+  return win.getComputedStyle(el).cursor === 'pointer';
+}
+
 // fb-018-005 §2.2 — sube por ancestros hasta encontrar el `table` (o elemento
 // con `getRole` ∈ {table, grid, treegrid}) que contiene a la celda. `null` si
 // la celda no está dentro de ningún subárbol de grid.
@@ -567,6 +579,10 @@ function emitElement(c, limits) {
   out.visible = c.visible;
   if (c.inert === true) out.inert = true;
   if (c.clickable === true) out.clickable = true;
+  // fb-023-004 D-1/D-3 — `actionable` es present-only y va INMEDIATAMENTE
+  // después de `clickable` y antes de `context` (preserva la adyacencia
+  // `context → column` de fb-023-002 D-6). No reutiliza `clickable`.
+  if (c.actionable === true) out.actionable = true;
   if (c.context && c.context.length) {
     const capped = capEntries(c.context, limits.contextEntries);
     out.context = capped.map((label) => truncateValue(label, limits.contextLength));
@@ -811,6 +827,7 @@ function computeGridPromotions(ctx) {
         inert: isInert(activeDialog, blocking, cell),
         context: ctx?.context ?? [],
         column: ctx?.column,
+        actionable: isActionableCell(cell, win),
         invalid: isInvalid(cell),
         ownValueTextNodes: textNodes,
         _gridTable: table,
@@ -1080,6 +1097,7 @@ export function serializeFrame(root, options) {
       inert: isInert(activeDialog, blocking, el),
       context,
       column,
+      actionable: isActionableCell(el, win),
       options: selectOptions,
       value,
       checked: checkedOf(el, tag, role),

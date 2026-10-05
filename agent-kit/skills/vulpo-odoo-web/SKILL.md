@@ -443,3 +443,29 @@ Odoo tab of your token:
 
 To connect to Vulpo and see the catalog of available tools, load the
 `vulpo` skill. For the navigation loop itself, load `vulpo-web-navigation`.
+
+## Actionable cells in list rows (`actionable`, fb-023-004)
+
+In a list (Odoo `one2many`/`many2many` rows), a read-mode cell that responds
+to a click is marked with the present-only key `actionable:true` (measured:
+`getComputedStyle(cell).cursor === 'pointer'`); the key is absent when the
+cell does not respond. It is a signal of *actionability*, not of
+*editability*: in an **editable** list a click enters edit mode, in a
+**read-only** list the same click opens the record. Do not infer which one
+from the map: read the folded response to see the controls that appeared.
+
+Recipe — click once, fold once, in a SINGLE call:
+
+1. `act click` on the cell's `ref`, passing `frame` folded into the same
+   call. The response is the map after the click: an editable list shows the
+   row's edit widgets (inputs/comboboxes); a read-only list shows the opened
+   record.
+2. For a closed-set widget (a `many2one`/`many2many` field whose control
+   carries `expands`/`expanded`), click its `ref` with `frame` folded again to
+   get the option set in the SAME response.
+
+**Read options with their own role; never filter by a fixed role.** The
+serializer emits each element's real accessible role: a `many2many` option set
+arrives as `role:"option"`, a `many2one` selector as `role:"menuitem"`. Pick
+the wanted option by its `name`/`ref`, never by an assumed role. Do not type
+into a closed-set field; open it and pick.
