@@ -1,7 +1,8 @@
 # Odoo.sh proxy
 
-`vlp-odoosh-proxy` is the read-only HTTP proxy that connects `odoosh-mcp` to
-an authenticated `odoo.sh` tab through Vulpo.
+`vlp-odoosh-proxy` is the HTTP proxy that connects `odoosh-mcp` to an
+authenticated `odoo.sh` tab through Vulpo. It is a transparent pass-through:
+the write ceiling lives on the `odoosh-mcp` side, not in the proxy.
 
 ## What it is
 
@@ -11,8 +12,9 @@ requests to the proxy instead of the web app, and the proxy runs each one as a
 synchronous evaluation inside an authenticated `odoo.sh` tab through Vulpo's
 `vlp_eval` tool.
 
-- It is read-only by default: the write scope is empty, so no request can
-  change an Odoo record.
+- It adds no write surface of its own. With the default `odoosh-mcp` profile
+  (`write_scope=[]`) no request can change an Odoo record; an operator opts
+  into writes on the `odoosh-mcp` side, never here.
 - It keeps the MCP session in memory only, discards the incoming Cookie and
   never emits the token.
 - The token is the same canonical token used by `vlpmcp`; there is no
@@ -141,3 +143,11 @@ Without a browser or a server the proxy still starts and `/healthz` answers
   the proxy needs **Build** mode to evaluate.
 - **The contract suite fails.** Run `cd agent-kit/odoosh-proxy && go test ./...`
   from the repository.
+
+## Upstream
+
+`odoosh-mcp` is an independent, MIT-licensed upstream project by
+**Hugo Adan Oliva**, published on PyPI as
+[`odoosh-mcp-server`](https://pypi.org/project/odoosh-mcp-server/). This proxy
+is a companion to it: it is not part of that project, and nothing from it is
+vendored here.
