@@ -8,7 +8,8 @@
 //   - Accept must contain application/json (else 406)
 //   - tools/call "vlp_eval" -> double envelope content[0].text =
 //     {"result":"<json string of {status,ct,url,body}>"}
-//   - tools/call "vlp_listTabs" -> {"tabs":[...],"count":N}
+//   - tools/call "vlp_listTabs" -> content[0].text = a BARE JSON array of tab
+//     objects [{id,url,title,windowId,active,pinned,index}] (spec §3.7)
 //   - programmable table path -> {status,ct,body,url} matched against the eval
 //     code (a url with "/web/login" drives P4a)
 //   - overlap flag per tabId (P14) and a per-eval delay (P6 timeout)
@@ -118,7 +119,7 @@ func newFakeMCP(t *testing.T) *fakeMCP {
 			body:   sampleRPCResponse,
 			url:    "https://www.odoo.sh/app/default",
 		},
-		tabs:     []map[string]any{{"id": 22, "title": "odoo.sh", "url": "https://www.odoo.sh/app"}},
+		tabs:     []map[string]any{tabWire(22, "https://www.odoo.sh/app", "odoo.sh", 0)},
 		inFlight: map[int]bool{},
 	}
 	f.srv = httptest.NewServer(f)
@@ -360,8 +361,28 @@ func (f *fakeMCP) pageFor(args json.RawMessage) fakePage {
 	return f.defaultPage
 }
 
+// tabsText returns the exact content[0].text the real server emits for
+// vlp_listTabs: a BARE JSON array of tab objects (spec §3.7, Enmienda 1) — NOT
+// an object {"tabs":[...],"count":N}. Emitting the object shape would let the
+// proxy parse a wire Vulpo never sends (the fb-025-001 review BLOCKING #1:
+// the old fake made P7 pass against the wrong wire).
 func (f *fakeMCP) tabsText() string {
-	return marshalNoHTML(map[string]any{"tabs": f.tabs, "count": len(f.tabs)})
+	return marshalNoHTML(f.tabs)
+}
+
+// tabWire builds one element of the vlp_listTabs result exactly as the
+// extension emits it (background.js listTabs -> tabs.map), per spec §3.7:
+// {id,url,title,windowId,active,pinned,index}.
+func tabWire(id int, url, title string, index int) map[string]any {
+	return map[string]any{
+		"id":       id,
+		"url":      url,
+		"title":    title,
+		"windowId": 1,
+		"active":   index == 0,
+		"pinned":   false,
+		"index":    index,
+	}
 }
 
 // pageEnvelope builds the double envelope the real server emits:

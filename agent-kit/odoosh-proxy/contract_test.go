@@ -152,6 +152,10 @@ func newEnv(t *testing.T, fakeURL string) *testEnv {
 		"VLP_PROXY_BIND":   "127.0.0.1",
 		"VLP_PROXY_PORT":   strconv.Itoa(port),
 		"VLP_EVAL_TIMEOUT": "2",
+		// Explicit tab id: isolates P1–P6/P8–P14 from the vlp_listTabs wire.
+		// Only P7 exercises discovery (its p7Env deletes this key), so the
+		// other postconditions stay independent of the tab-listing shape.
+		"VLP_EVAL_TAB": "22",
 	}
 	return e
 }

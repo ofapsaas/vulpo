@@ -176,13 +176,16 @@ func p7Env(t *testing.T, tabs []map[string]any) (*fakeMCP, *testEnv) {
 	f.set(func(f *fakeMCP) { f.tabs = tabs })
 	f.addPage("/app/x", fakePage{status: 200, ct: "application/json", body: sampleRPCResponse, url: "https://www.odoo.sh/app/x"})
 	env := newEnv(t, f.URL())
+	// P7a/P7c exercise discovery: clear the explicit tab so the proxy must
+	// call vlp_listTabs and parse the bare array. P7b re-sets it to 33.
+	delete(env.Vars, "VLP_EVAL_TAB")
 	return f, env
 }
 
 func TestP7a_DiscoverTabByPrefix(t *testing.T) {
 	f, env := p7Env(t, []map[string]any{
-		{"id": 11, "title": "other", "url": "https://other.example/x"},
-		{"id": 22, "title": "odoo.sh", "url": "https://www.odoo.sh/app"},
+		tabWire(11, "https://other.example/x", "other", 0),
+		tabWire(22, "https://www.odoo.sh/app", "odoo.sh", 1),
 	})
 	startProxy(t, env)
 
@@ -202,7 +205,7 @@ func TestP7a_DiscoverTabByPrefix(t *testing.T) {
 
 func TestP7b_ExplicitTabSkipsDiscovery(t *testing.T) {
 	f, env := p7Env(t, []map[string]any{
-		{"id": 11, "title": "other", "url": "https://other.example/x"},
+		tabWire(11, "https://other.example/x", "other", 0),
 	})
 	env.Vars["VLP_EVAL_TAB"] = "33"
 	startProxy(t, env)
@@ -223,7 +226,7 @@ func TestP7b_ExplicitTabSkipsDiscovery(t *testing.T) {
 
 func TestP7c_NoMatchingTabGives502(t *testing.T) {
 	f, env := p7Env(t, []map[string]any{
-		{"id": 1, "title": "other", "url": "https://other.example/x"},
+		tabWire(1, "https://other.example/x", "other", 0),
 	})
 	startProxy(t, env)
 
