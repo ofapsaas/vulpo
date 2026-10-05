@@ -12,7 +12,8 @@ import (
 )
 
 // config is the complete proxy configuration, resolved from the environment
-// once at startup (spec §3.2).
+// once at startup (spec §3.2). The 001 fields are unchanged; the recovery
+// fields are added by fb-025-002 (spec §3.2).
 type config struct {
 	bind             string
 	port             string
@@ -23,6 +24,16 @@ type config struct {
 	logFile          string
 	evalTimeout      time.Duration
 	allowNonLoopback bool
+
+	// fb-025-002 resilience knobs (spec §3.2).
+	recoverOnAmbiguous   bool
+	recoverAllowFocus    bool
+	recoverReadyDeadline time.Duration
+	recoverReadyPoll     time.Duration
+	transportMaxBytes    int64
+	resolveRetries       int
+	resolveBackoff       time.Duration
+	readyzTimeout        time.Duration
 }
 
 // loadConfig reads the env schema of spec §3.2 with its documented defaults.
@@ -32,6 +43,43 @@ func loadConfig() (config, error) {
 		return config{}, fmt.Errorf("cannot resolve home directory: %w", err)
 	}
 	timeout, err := evalTimeout()
+	if err != nil {
+		return config{}, err
+	}
+	recoverDeadline, err := envMillis("VLP_RECOVER_READY_DEADLINE_MS", 10000)
+	if err != nil {
+		return config{}, err
+	}
+	// The ready deadline lives inside the eval budget (spec §3.2). Clamp rather
+	// than refuse so the 001 env (which never sets this var) keeps starting.
+	if recoverDeadline > timeout {
+		recoverDeadline = timeout
+	}
+	recoverPoll, err := envMillis("VLP_RECOVER_READY_POLL_MS", 250)
+	if err != nil {
+		return config{}, err
+	}
+	transportMax, err := envInt64("VLP_TRANSPORT_MAX_BYTES", 2097152)
+	if err != nil {
+		return config{}, err
+	}
+	resolveRetries, err := envInt("VLP_RESOLVE_RETRIES", 5)
+	if err != nil {
+		return config{}, err
+	}
+	resolveBackoff, err := envMillis("VLP_RESOLVE_BACKOFF_MS", 200)
+	if err != nil {
+		return config{}, err
+	}
+	readyzTimeout, err := envMillis("VLP_READYZ_TIMEOUT_MS", 2000)
+	if err != nil {
+		return config{}, err
+	}
+	recoverOnAmbiguous, err := envFlag("VLP_RECOVER_ON_AMBIGUOUS", true)
+	if err != nil {
+		return config{}, err
+	}
+	recoverAllowFocus, err := envFlag("VLP_RECOVER_ALLOW_FOCUS", false)
 	if err != nil {
 		return config{}, err
 	}
@@ -45,6 +93,15 @@ func loadConfig() (config, error) {
 		logFile:          os.Getenv("VLP_PROXY_LOG"),
 		evalTimeout:      timeout,
 		allowNonLoopback: os.Getenv("VLP_PROXY_ALLOW_NON_LOOPBACK") == "1",
+
+		recoverOnAmbiguous:   recoverOnAmbiguous,
+		recoverAllowFocus:    recoverAllowFocus,
+		recoverReadyDeadline: recoverDeadline,
+		recoverReadyPoll:     recoverPoll,
+		transportMaxBytes:    transportMax,
+		resolveRetries:       resolveRetries,
+		resolveBackoff:       resolveBackoff,
+		readyzTimeout:        readyzTimeout,
 	}, nil
 }
 
@@ -122,4 +179,54 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// envInt parses a positive integer env var; unset -> def (spec §3.2, fail loud
+// on a non-numeric or non-positive value).
+func envInt(key string, def int) (int, error) {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer: %q", key, raw)
+	}
+	return n, nil
+}
+
+// envInt64 is envInt for a 64-bit value (VLP_TRANSPORT_MAX_BYTES).
+func envInt64(key string, def int64) (int64, error) {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return def, nil
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer: %q", key, raw)
+	}
+	return n, nil
+}
+
+// envMillis parses a positive number of milliseconds into a Duration.
+func envMillis(key string, def int) (time.Duration, error) {
+	ms, err := envInt(key, def)
+	if err != nil {
+		return 0, err
+	}
+	return time.Duration(ms) * time.Millisecond, nil
+}
+
+// envFlag parses a "0"/"1" env var; unset -> def.
+func envFlag(key string, def bool) (bool, error) {
+	switch raw := os.Getenv(key); raw {
+	case "":
+		return def, nil
+	case "1":
+		return true, nil
+	case "0":
+		return false, nil
+	default:
+		return false, fmt.Errorf("%s must be 0 or 1: %q", key, raw)
+	}
 }

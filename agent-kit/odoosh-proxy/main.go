@@ -42,7 +42,7 @@ func run() error {
 	addr := net.JoinHostPort(cfg.bind, cfg.port)
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: newProxy(cfg, newMCPClient(cfg.url, token, cfg.evalTimeout)),
+		Handler: newProxy(cfg, newMCPClient(cfg.url, token, cfg.evalTimeout, cfg.transportMaxBytes)),
 	}
 	log.Printf("vlp-odoosh-proxy listening on %s", addr)
 	return srv.ListenAndServe()

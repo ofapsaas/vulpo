@@ -25,24 +25,38 @@ var (
 	errEvalTimeout = errors.New("eval timed out")
 )
 
+// transportCapError is returned when a tools/call response body exceeds
+// VLP_TRANSPORT_MAX_BYTES before decoding (spec D-6, §3.5.1). It is a
+// rejection, never a truncation.
+type transportCapError struct {
+	n   int
+	cap int64
+}
+
+func (e *transportCapError) Error() string {
+	return fmt.Sprintf("transport response too large: %d bytes > %d", e.n, e.cap)
+}
+
 // mcpClient speaks the MCP Streamable HTTP transport against VLP_URL. The
 // session id lives only in memory (D-8); on a 404 the client re-initializes
 // once and retries once, exactly like vlpmcp (spec D-1, P11).
 type mcpClient struct {
-	url     string
-	token   string
-	http    *http.Client
-	sessMu  sync.Mutex
-	session string
-	idMu    sync.Mutex
-	nextID  int
+	url      string
+	token    string
+	http     *http.Client
+	maxBytes int64
+	sessMu   sync.Mutex
+	session  string
+	idMu     sync.Mutex
+	nextID   int
 }
 
-func newMCPClient(url, token string, timeout time.Duration) *mcpClient {
+func newMCPClient(url, token string, timeout time.Duration, maxBytes int64) *mcpClient {
 	return &mcpClient{
-		url:   url,
-		token: token,
-		http:  &http.Client{Timeout: timeout},
+		url:      url,
+		token:    token,
+		http:     &http.Client{Timeout: timeout},
+		maxBytes: maxBytes,
 	}
 }
 
@@ -165,12 +179,17 @@ func (c *mcpClient) post(msg []byte, session string) (*mcpResponse, error) {
 		return nil, err
 	}
 	defer httpResp.Body.Close()
-	body, err := io.ReadAll(httpResp.Body)
+	// Pre-decode read cap (spec D-6): read at most cap+1 bytes so exceeding the
+	// cap is observable without buffering an unbounded response.
+	body, err := io.ReadAll(io.LimitReader(httpResp.Body, c.maxBytes+1))
 	if err != nil {
 		if isTimeout(err) {
 			return nil, errEvalTimeout
 		}
 		return nil, err
+	}
+	if int64(len(body)) > c.maxBytes {
+		return nil, &transportCapError{n: len(body), cap: c.maxBytes}
 	}
 	return &mcpResponse{
 		status:  httpResp.StatusCode,

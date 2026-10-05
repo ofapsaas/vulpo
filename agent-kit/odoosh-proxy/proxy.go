@@ -19,6 +19,9 @@ const (
 	// maxResponseBody is the 1 MiB ceiling on the decoded page body (D-10):
 	// beyond it the proxy rejects with 502 instead of truncating.
 	maxResponseBody = 1 << 20
+	// readyStateProbeCode is the exact eval code that reads document.readyState
+	// (spec §3.4; the fake discriminates probe vs page eval on it).
+	readyStateProbeCode = "document.readyState"
 )
 
 // proxy is the HTTP handler: it discards the Cookie, enforces the allowlist,
@@ -35,9 +38,13 @@ func newProxy(cfg config, client *mcpClient) *proxy {
 }
 
 func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// /healthz is evaluated before the path guard (spec D-5, §3.4).
+	// /healthz and /readyz are evaluated before the path guard (spec D-5, §3.6).
 	if r.Method == http.MethodGet && r.URL.Path == "/healthz" {
 		p.healthz(w)
+		return
+	}
+	if r.Method == http.MethodGet && r.URL.Path == "/readyz" {
+		p.readyz(w)
 		return
 	}
 	if !allowedRequest(r) {
@@ -82,79 +89,309 @@ func (p *proxy) handleApp(w http.ResponseWriter, r *http.Request) {
 	// The Cookie is discarded: only its presence is logged, never its value.
 	p.logRequest(r, path)
 
-	tabID, err := p.resolveTab()
+	tabID, tabURL, err := p.resolveTab()
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 
+	// The per-tab lock spans the whole cycle, including any recovery, so evals
+	// to the same tab never overlap (D-12, P12).
 	release := p.locker.lock(tabID)
-	resp, err := p.client.callTool("vlp_eval", map[string]any{"tabId": tabID, "code": code})
-	release()
+	defer release()
+
+	pg, rpcErr, err := p.evalOnce(tabID, code)
 	if err != nil {
 		p.writeClientError(w, err)
 		return
 	}
+	if rpcErr != nil {
+		p.handleToolError(w, rpcErr, tabID, tabURL, code)
+		return
+	}
+	p.writePage(w, pg)
+}
 
+// evalOnce runs one vlp_eval and unwraps its result. A tool error is returned
+// separately so the caller can classify it; a transport error is returned as
+// err (spec §3.5).
+func (p *proxy) evalOnce(tabID int, code string) (page, *rpcError, error) {
+	resp, err := p.client.callTool("vlp_eval", map[string]any{"tabId": tabID, "code": code})
+	if err != nil {
+		return page{}, nil, err
+	}
 	text, rpcErr, err := toolText(resp.body)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "upstream response is malformed")
-		return
+		return page{}, nil, errors.New("upstream response is malformed")
 	}
 	if rpcErr != nil {
-		writeError(w, http.StatusBadGateway, rpcErr.Message)
-		return
+		return page{}, rpcErr, nil
 	}
-	page, err := decodePage(text)
+	pg, err := decodePage(text)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "upstream eval result is malformed")
-		return
+		return page{}, nil, errors.New("upstream eval result is malformed")
 	}
-	p.writePage(w, page)
+	return pg, nil, nil
 }
 
 // resolveTab returns the target tab: VLP_EVAL_TAB when set, otherwise the
-// first tab whose url starts with VLP_TAB_URL_PREFIX (spec P7).
-func (p *proxy) resolveTab() (int, error) {
+// first tab whose url starts with VLP_TAB_URL_PREFIX. Discovery retries with
+// linear backoff to absorb the readiness race after a reconnection (D-10, P8);
+// the tab id is never cached.
+func (p *proxy) resolveTab() (int, string, error) {
 	if p.cfg.evalTab != "" {
 		id, err := strconv.Atoi(p.cfg.evalTab)
 		if err != nil {
-			return 0, fmt.Errorf("VLP_EVAL_TAB is not a tab id: %q", p.cfg.evalTab)
+			return 0, "", fmt.Errorf("VLP_EVAL_TAB is not a tab id: %q", p.cfg.evalTab)
 		}
-		return id, nil
+		return id, "", nil
 	}
 
+	var lastErr error
+	for attempt := 0; attempt <= p.cfg.resolveRetries; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * p.cfg.resolveBackoff)
+		}
+		tabs, err := p.listTabs()
+		if err != nil {
+			return 0, "", err
+		}
+		for _, tab := range tabs {
+			if strings.HasPrefix(tab.URL, p.cfg.tabPrefix) {
+				return tab.ID, tab.URL, nil
+			}
+		}
+		lastErr = fmt.Errorf("no tab found with url prefix %q", p.cfg.tabPrefix)
+	}
+	return 0, "", lastErr
+}
+
+// tabInfo is one element of the vlp_listTabs wire: a BARE JSON array of tab
+// objects in content[0].text (spec §3.7).
+type tabInfo struct {
+	ID  int    `json:"id"`
+	URL string `json:"url"`
+}
+
+// listTabs calls vlp_listTabs and parses the bare array wire (the object shape
+// {"tabs":[…]} is accepted too for robustness).
+func (p *proxy) listTabs() ([]tabInfo, error) {
 	resp, err := p.client.callTool("vlp_listTabs", map[string]any{})
 	if err != nil {
-		return 0, errors.New("cannot list Vulpo tabs")
+		return nil, err
 	}
 	text, rpcErr, err := toolText(resp.body)
 	if err != nil || rpcErr != nil {
-		return 0, errors.New("cannot list Vulpo tabs")
+		return nil, errors.New("cannot list Vulpo tabs")
 	}
-	// The real vlp_listTabs wire is a BARE JSON array of tab objects in
-	// content[0].text (spec §3.7, Enmienda 1). The object shape
-	// {"tabs":[…]} is accepted too for robustness.
-	type tabInfo struct {
-		ID  int    `json:"id"`
-		URL string `json:"url"`
-	}
+	return parseTabs(text)
+}
+
+func parseTabs(text string) ([]tabInfo, error) {
 	var tabs []tabInfo
-	if err := json.Unmarshal([]byte(text), &tabs); err != nil {
-		var listing struct {
-			Tabs []tabInfo `json:"tabs"`
-		}
-		if err := json.Unmarshal([]byte(text), &listing); err != nil {
-			return 0, errors.New("cannot list Vulpo tabs")
-		}
-		tabs = listing.Tabs
+	if err := json.Unmarshal([]byte(text), &tabs); err == nil {
+		return tabs, nil
+	}
+	var listing struct {
+		Tabs []tabInfo `json:"tabs"`
+	}
+	if err := json.Unmarshal([]byte(text), &listing); err != nil {
+		return nil, errors.New("cannot list Vulpo tabs")
+	}
+	return listing.Tabs, nil
+}
+
+// lookupTabURL resolves the current url of a fixed tab id. Only the recovery
+// path uses it, so the normal VLP_EVAL_TAB path still avoids vlp_listTabs
+// (D-13, preserves P7b of 001).
+func (p *proxy) lookupTabURL(tabID int) (string, error) {
+	tabs, err := p.listTabs()
+	if err != nil {
+		return "", err
 	}
 	for _, tab := range tabs {
-		if strings.HasPrefix(tab.URL, p.cfg.tabPrefix) {
-			return tab.ID, nil
+		if tab.ID == tabID {
+			return tab.URL, nil
 		}
 	}
-	return 0, fmt.Errorf("no tab found with url prefix %q", p.cfg.tabPrefix)
+	return "", fmt.Errorf("no tab with id %d", tabID)
+}
+
+// toolClass is one row of the closed classification table (spec §3.5.1).
+type toolClass struct {
+	status  int
+	prefix  string
+	recover bool // a candidate for a discarded tab (D-1)
+}
+
+// classifyToolMessage maps a tool error message to the closed table. A message
+// outside the table is a generic 502 that never recovers (D-11, I-13).
+func classifyToolMessage(msg string) toolClass {
+	switch {
+	case strings.Contains(msg, "An unexpected error occurred"),
+		strings.Contains(msg, "Missing host permission for the tab"):
+		return toolClass{recover: true}
+	case strings.Contains(msg, "command_timeout:"):
+		return toolClass{status: http.StatusGatewayTimeout, prefix: "hub idle timeout: "}
+	case strings.Contains(msg, "blocked in Plan mode"):
+		return toolClass{status: http.StatusBadGateway, prefix: "plan mode: "}
+	case strings.Contains(msg, "Rate limit exceeded"):
+		return toolClass{status: http.StatusBadGateway, prefix: "rate limit: "}
+	case strings.Contains(msg, "Code too large"):
+		return toolClass{status: http.StatusRequestEntityTooLarge, prefix: "code too large: "}
+	case strings.Contains(msg, "superseded"):
+		return toolClass{status: http.StatusBadGateway, prefix: "superseded [terminal]: "}
+	case strings.Contains(msg, "extension disconnected"):
+		return toolClass{status: http.StatusBadGateway, prefix: "extension disconnected [transient]: "}
+	case strings.Contains(msg, "No extension has tab"):
+		return toolClass{status: http.StatusBadGateway, prefix: "no tab: "}
+	default:
+		return toolClass{status: http.StatusBadGateway, prefix: "tool error: "}
+	}
+}
+
+// handleToolError classifies a tool error and, for a discarded-tab candidate,
+// runs one bounded recovery cycle. Every classified body antepones a semantic
+// mark to the raw message, which is always preserved as a substring
+// (spec §3.5.1/C-10).
+func (p *proxy) handleToolError(w http.ResponseWriter, rpcErr *rpcError, tabID int, tabURL, code string) {
+	cls := classifyToolMessage(rpcErr.Message)
+	if !cls.recover {
+		writeError(w, cls.status, cls.prefix+rpcErr.Message)
+		return
+	}
+	if !p.cfg.recoverOnAmbiguous {
+		// D-7 of 001 preserved: an ambiguous -32000 with recovery off is a
+		// plain 502 carrying the raw message.
+		writeError(w, http.StatusBadGateway, rpcErr.Message)
+		return
+	}
+	p.recoverTab(w, tabID, tabURL, code, rpcErr.Message)
+}
+
+// recoverTab runs the bounded recovery cycle (D-3, I-11): load the tab, wait
+// for readyState:complete, re-emit the original eval once; an opt-in focus
+// fallback adds at most one more load + retry. Persistent failure -> 502
+// "recovery failed: <raw>".
+func (p *proxy) recoverTab(w http.ResponseWriter, tabID int, tabURL, code, raw string) {
+	last := raw
+
+	url := tabURL
+	if url == "" {
+		if resolved, err := p.lookupTabURL(tabID); err == nil {
+			url = resolved
+		}
+	}
+	// Primary, no focus: navigate to the current url (D-2).
+	if url != "" {
+		if _, err := p.client.callTool("vlp_navigate", map[string]any{"tabId": tabID, "url": url}); err == nil {
+			if p.waitReady(tabID) == nil {
+				pg, rpcErr, err := p.evalOnce(tabID, code)
+				if err != nil {
+					p.writeClientError(w, err)
+					return
+				}
+				if rpcErr == nil {
+					p.writePage(w, pg)
+					return
+				}
+				last = rpcErr.Message
+			}
+		}
+	}
+
+	// Opt-in fallback that steals focus (D-2), bounded to one attempt.
+	if p.cfg.recoverAllowFocus {
+		if _, err := p.client.callTool("vlp_activateTab", map[string]any{"tabId": tabID}); err == nil {
+			if p.waitReady(tabID) == nil {
+				pg, rpcErr, err := p.evalOnce(tabID, code)
+				if err != nil {
+					p.writeClientError(w, err)
+					return
+				}
+				if rpcErr == nil {
+					p.writePage(w, pg)
+					return
+				}
+				last = rpcErr.Message
+			}
+		}
+	}
+
+	writeError(w, http.StatusBadGateway, "recovery failed: "+last)
+}
+
+// waitReady polls document.readyState until it reports "complete" or the
+// deadline expires (D-3). The number of probes is bounded by
+// deadline/poll + 1.
+func (p *proxy) waitReady(tabID int) error {
+	deadline := time.Now().Add(p.cfg.recoverReadyDeadline)
+	for {
+		if time.Now().After(deadline) {
+			return errors.New("readyState did not reach complete before the deadline")
+		}
+		resp, err := p.client.callTool("vlp_eval", map[string]any{"tabId": tabID, "code": readyStateProbeCode})
+		if err != nil {
+			return err
+		}
+		text, rpcErr, err := toolText(resp.body)
+		if err != nil {
+			return err
+		}
+		if rpcErr == nil {
+			var probe struct {
+				Result string `json:"result"`
+			}
+			if err := json.Unmarshal([]byte(text), &probe); err == nil && strings.TrimSpace(probe.Result) == "complete" {
+				return nil
+			}
+		}
+		time.Sleep(p.cfg.recoverReadyPoll)
+	}
+}
+
+// readyz is a readiness probe: it consults the extension and the tab, unlike
+// /healthz which is liveness-only (D-5, §3.6). It is bounded by
+// VLP_READYZ_TIMEOUT_MS.
+func (p *proxy) readyz(w http.ResponseWriter) {
+	result := make(chan string, 1)
+	go func() { result <- p.readiness() }()
+	select {
+	case motivo := <-result:
+		if motivo == "" {
+			writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+			return
+		}
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready", "error": motivo})
+	case <-time.After(p.cfg.readyzTimeout):
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready", "error": "readiness probe timed out"})
+	}
+}
+
+// readiness returns "" when the chain is ready, or a secret-free motivo.
+func (p *proxy) readiness() string {
+	tabs, err := p.listTabs()
+	if err != nil {
+		return "extension unreachable"
+	}
+	tabID := -1
+	for _, tab := range tabs {
+		if strings.HasPrefix(tab.URL, p.cfg.tabPrefix) {
+			tabID = tab.ID
+			break
+		}
+	}
+	if tabID < 0 {
+		return "no tab with the configured url prefix"
+	}
+	resp, err := p.client.callTool("vlp_eval", map[string]any{"tabId": tabID, "code": readyStateProbeCode})
+	if err != nil {
+		return "tab is not evaluable"
+	}
+	if _, rpcErr, err := toolText(resp.body); err != nil || rpcErr != nil {
+		return "tab is not evaluable"
+	}
+	return ""
 }
 
 // buildEvalCode wraps the path and body in a synchronous same-origin XHR that
@@ -211,11 +448,14 @@ func (p *proxy) writePage(w http.ResponseWriter, pg page) {
 	_, _ = io.WriteString(w, pg.Body)
 }
 
-// writeClientError maps MCP transport errors (spec §3.6).
+// writeClientError maps MCP transport errors (spec §3.5/§3.5.1).
 func (p *proxy) writeClientError(w http.ResponseWriter, err error) {
+	var capErr *transportCapError
 	switch {
 	case errors.Is(err, errEvalTimeout):
-		writeError(w, http.StatusGatewayTimeout, "eval timed out")
+		writeError(w, http.StatusGatewayTimeout, "eval timeout")
+	case errors.As(err, &capErr):
+		writeError(w, http.StatusBadGateway, capErr.Error())
 	case errors.Is(err, errUpstreamAuth):
 		writeError(w, http.StatusBadGateway, "upstream authentication failed")
 	case errors.Is(err, errSessionLost):
@@ -261,7 +501,13 @@ func (p *proxy) logRequest(r *http.Request, path string) {
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
+	// The documented error body is {"error":"<msg>"} and the raw tool message
+	// must be preserved VERBATIM as a substring (spec §3.5.1/C-10). The
+	// template is therefore filled literally: re-encoding would escape the
+	// quotes a raw message may carry (e.g. Plan mode) and break preservation.
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = io.WriteString(w, `{"error":"`+msg+`"}`+"\n")
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
