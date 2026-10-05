@@ -46,7 +46,7 @@ like; `expands:false` still means "there is something to open here", not
 
 Open it and pick, in one call: `act click` on the field's `ref`, with `frame`
 folded into the same call, returns the map with the dropdown already open —
-its options arrive as `role:"menuitem"` entries, and on them selected marks
+its options arrive with their own accessible role (measured: `role:"option"`), and on them selected marks
 the highlighted option — the one Enter would take: usually the first option
 of the open list, and with a search filter active the first filtered match
 takes it by construction of the search. The highlight is never the field's
@@ -58,7 +58,7 @@ field's own option — a different one — reported `selected:false`, read from
 the field's own `value` key, while the highlight sat on the FIRST option:
 
 ```json
-{"name":"SL/Existencias/En Tránsito","role":"menuitem","selected":true,"ref":"…>span:1"}
+{"name":"SL/Existencias/En Tránsito","role":"option","selected":true,"ref":"…>span:1"}
 ```
 
 Never pick an option because it has `selected:true` — pick an option by its
@@ -134,11 +134,11 @@ and `read[]`.
 
 For orders/documents with lines (e.g. RFQ, invoice): `Add a product` (or
 equivalent) creates a new row. That row's product field is a many2one
-combobox — apply the generic recipe from `vulpo-web-navigation` §5 (type → re-read →
-click option). Quantity and other numeric fields of the row are normal inputs
-inside the same freshly created row — remember to `getFrame` again after
-clicking the combobox option before touching the quantity cell, because adding
-the row mutated the DOM.
+combobox carrying `expands`/`expanded` — a closed set: open it with an
+`act click` on the field's `ref` plus `frame` folded into the same call,
+then pick the wanted option by its `name`/`ref`. Quantity and other numeric
+fields of the row are normal inputs — `re-read` the frame after picking the
+option before touching the quantity cell: adding the row mutated the DOM.
 
 ## Numeric fields (float, monetary, quantities)
 
@@ -466,6 +466,45 @@ Recipe — click once, fold once, in a SINGLE call:
 
 **Read options with their own role; never filter by a fixed role.** The
 serializer emits each element's real accessible role: a `many2many` option set
-arrives as `role:"option"`, a `many2one` selector as `role:"menuitem"`. Pick
+arrives as `role:"option"` (measured); do not fix a role for the selector. Pick
 the wanted option by its `name`/`ref`, never by an assumed role. Do not type
 into a closed-set field; open it and pick.
+
+## Modals that take over the page (fb-023-005)
+
+Some actions open a modal that makes the page behind it `inert`, so later clicks
+silently fail. Re-read the map, resolve the modal, and only then continue.
+
+**Product configurator.** Picking a configurable product (or adding its line) can
+open a product configurator modal `{modal:true, name:"Configure su producto",
+role:"dialog"}`. While it is open the page stays `inert`. Either complete the
+choices it asks for, or `dismiss` it when the default configuration is
+acceptable — never keep clicking the page behind it.
+
+**Server error modal.** A write can fail server-side and surface as a modal
+`{modal:true, name:"¡Uy!"}` carrying an `RPC_ERROR` (measured: a `psycopg2`
+`virtual_216` error on `sale_order_line`). This is an upstream server defect, not
+a bad selector: do not retry blindly. Re-read the record; if the write did not
+persist, report the `error` instead of repeating the action.
+
+## Loading a new line in an editable list (fb-023-005)
+
+Recipe for adding one line to an editable `one2many` list whose row cell is a
+`many2one` (a closed set with `expands`). Fold `frame` into each `act` call so
+one response carries the next controls:
+
+1. **Add the line.** `act click` on the add-row control (`Add a product`/`Add a
+   line`) with `frame` folded in; the response is the map with the new empty row.
+2. **Open the product cell.** `act click` on the new row's product cell `ref`,
+   `frame` folded again. A closed set never takes a typed value: it only opens.
+3. **Pick the option.** In the same response the options arrive with their own
+   role; `act click` on the wanted option's `ref` (resolve it by `name`/`ref`,
+   never by a fixed role).
+4. **Quantity.** `re-read` the frame, then `act type` the number into the row's
+   quantity cell under the site's separator convention.
+5. **Save.** `act click` on the save control with `frame` folded in, then confirm
+   the result in `read[]` — never assume autosave.
+
+**Observed barrier — background tab.** With `document.hidden:true` the effects
+arrived 2–16 s late and a folded frame returned `changedSinceLast:false`; keep
+the tab in the foreground, and if a read looks stale, re-read before concluding.
