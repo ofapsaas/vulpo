@@ -60,8 +60,12 @@ func TestR5b_HostPermissionRecovers(t *testing.T) {
 func TestR5c_PlanMode(t *testing.T) {
 	f, res := r5EvalError(t, rawPlanMode)
 	expectStatus(t, res, 502)
-	expectContains(t, "body", string(res.Body), litPlanMode)
-	expectContains(t, "body", string(res.Body), rawPlanMode) // raw preserved (§3.5.1)
+	// §3.5.1 (enmendada 2026-10-05): el body es SIEMPRE JSON válido (json.Marshal,
+	// como 001); el raw de Plan mode contiene comillas, así que se compara sobre
+	// el campo `error` DECODIFICADO (módulo escape JSON), nunca sobre los bytes.
+	decoded := decodeErrorField(t, res.Body)
+	expectContains(t, "decoded error", decoded, litPlanMode)
+	expectContains(t, "decoded error", decoded, rawPlanMode) // raw preserved modulo JSON escape
 	if navigateCount(f)+activateCount(f) != 0 {
 		t.Errorf("fb-025-002 %s: Plan mode must not recover (navigate=%d activate=%d)", t.Name(), navigateCount(f), activateCount(f))
 	}

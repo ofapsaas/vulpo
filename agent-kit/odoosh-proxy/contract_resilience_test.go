@@ -6,6 +6,7 @@
 package main_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -70,6 +71,25 @@ func requireFakeReached(t *testing.T, f *fakeMCP) {
 	if len(f.requests()) == 0 {
 		t.Fatalf("fb-025-002 %s: the fake MCP received no request; the proxy never reached the transport", t.Name())
 	}
+}
+
+// decodeErrorField enforces the amended §3.5.1: the proxy error body is ALWAYS
+// valid JSON (json.Marshal, exactly like 001) of the shape {"error":"<msg>"}.
+// It fails the test if the body cannot be unmarshalled and returns the decoded
+// `error` field, which is the surface the raw tool message must be compared on
+// (module the JSON escape — never on the raw bytes).
+func decodeErrorField(t *testing.T, body []byte) string {
+	t.Helper()
+	var envelope struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		t.Fatalf("fb-025-002 %s: error body is not valid JSON (spec §3.5.1: always json.Marshal like 001): %v\nbody: %q", t.Name(), err, body)
+	}
+	if envelope.Error == "" {
+		t.Errorf("fb-025-002 %s: error body has no `error` field\nbody: %q", t.Name(), body)
+	}
+	return envelope.Error
 }
 
 // evalCodes returns the eval `code`s in arrival order (probe vs page).
