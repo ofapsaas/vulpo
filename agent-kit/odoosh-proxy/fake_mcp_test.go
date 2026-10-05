@@ -104,6 +104,21 @@ type fakeMCP struct {
 
 	inFlight map[int]bool
 	overlap  bool
+
+	// fb-025-002 programmable resilience state (spec §3.4). Every field has a
+	// neutral zero value so the 001 suite is unaffected; connected is the one
+	// exception (zero false would break 001) and is set true in newFakeMCP.
+	connected           bool     // false => vlp_listTabs/vlp_eval -> -32000 noExtensionMsg
+	discarded           bool     // stateful "tab discarded": page eval -> -32000 candidate
+	discardedTab        int      // tab the discard applies to (0 = any tab)
+	discardedMsg        string   // raw -32000 while discarded ("" => generic Firefox text)
+	navigateRecovers    bool     // a vlp_navigate to the tab clears discarded
+	activateRecovers    bool     // a vlp_activateTab to the tab clears discarded
+	readyStates         []string // probe sequence (pop; last repeats; empty => "complete")
+	lastReadyState      string
+	listTabsEmpty       int  // first K vlp_listTabs calls return []
+	listTabsAlwaysEmpty bool // every vlp_listTabs call returns []
+	transportHuge       int  // >0 => pad the tools/call response beyond this many bytes
 }
 
 func newFakeMCP(t *testing.T) *fakeMCP {
@@ -121,6 +136,9 @@ func newFakeMCP(t *testing.T) *fakeMCP {
 		},
 		tabs:     []map[string]any{tabWire(22, "https://www.odoo.sh/app", "odoo.sh", 0)},
 		inFlight: map[int]bool{},
+		// fb-025-002 §6: connected must default true, or every 001 test that
+		// reaches vlp_listTabs/vlp_eval would get a spurious -32000.
+		connected: true,
 	}
 	f.srv = httptest.NewServer(f)
 	t.Cleanup(f.srv.Close)
@@ -320,11 +338,39 @@ func (f *fakeMCP) decide(rec *recorded, req rpcRequest, parseErr error) fakeResp
 	case "tools/call":
 		switch rec.ToolName {
 		case "vlp_listTabs":
+			if !f.connected {
+				msg["error"] = map[string]any{"code": -32000, "message": noExtensionMsg}
+				break
+			}
+			if f.listTabsAlwaysEmpty || f.listTabsEmpty > 0 {
+				if f.listTabsEmpty > 0 {
+					f.listTabsEmpty--
+				}
+				// H4: emit a bare empty ARRAY, never null (marshalNoHTML(nil)).
+				msg["result"] = map[string]any{
+					"content": []any{map[string]any{"type": "text", "text": "[]"}},
+				}
+				break
+			}
 			msg["result"] = map[string]any{
 				"content": []any{map[string]any{"type": "text", "text": f.tabsText()}},
 			}
 		case "vlp_eval":
-			if f.evalErr != nil {
+			// §6 priority: connected -> probe -> discarded -> evalErr -> page.
+			if !f.connected {
+				msg["error"] = map[string]any{"code": -32000, "message": noExtensionMsg}
+			} else if isReadyStateProbe(argCode(rec.Arguments)) {
+				// H2: readyState probe -> {"result":"<readyState>"} (plain string).
+				msg["result"] = map[string]any{
+					"content": []any{map[string]any{"type": "text", "text": marshalNoHTML(map[string]any{"result": f.nextReadyState()})}},
+				}
+			} else if f.discarded && (f.discardedTab == 0 || argTabID(rec.Arguments) == f.discardedTab) {
+				raw := f.discardedMsg
+				if raw == "" {
+					raw = discardedCandidateMsg
+				}
+				msg["error"] = map[string]any{"code": -32000, "message": raw}
+			} else if f.evalErr != nil {
 				msg["error"] = map[string]any{"code": f.evalErr.Code, "message": f.evalErr.Message}
 			} else {
 				page := f.pageFor(rec.Arguments)
@@ -333,8 +379,48 @@ func (f *fakeMCP) decide(rec *recorded, req rpcRequest, parseErr error) fakeResp
 				}
 			}
 			delay = f.callDelay
+		case "vlp_navigate":
+			// Wire pinned in spec §3.4: {"success":true,"tabId":<id>,"url":"<url>"}.
+			if !f.connected {
+				msg["error"] = map[string]any{"code": -32000, "message": noExtensionMsg}
+				break
+			}
+			var a struct {
+				TabID int    `json:"tabId"`
+				URL   string `json:"url"`
+			}
+			_ = json.Unmarshal(rec.Arguments, &a)
+			if f.discarded && f.navigateRecovers && (f.discardedTab == 0 || a.TabID == f.discardedTab) {
+				f.discarded = false
+			}
+			msg["result"] = map[string]any{
+				"content": []any{map[string]any{"type": "text", "text": marshalNoHTML(map[string]any{"success": true, "tabId": a.TabID, "url": a.URL})}},
+			}
+		case "vlp_activateTab":
+			// Wire pinned in spec §3.4: {"success":true,"tabId":<id>,"title":…,"url":…}.
+			if !f.connected {
+				msg["error"] = map[string]any{"code": -32000, "message": noExtensionMsg}
+				break
+			}
+			var a struct {
+				TabID int `json:"tabId"`
+			}
+			_ = json.Unmarshal(rec.Arguments, &a)
+			if f.discarded && f.activateRecovers && (f.discardedTab == 0 || a.TabID == f.discardedTab) {
+				f.discarded = false
+			}
+			title, url := f.tabInfo(a.TabID)
+			msg["result"] = map[string]any{
+				"content": []any{map[string]any{"type": "text", "text": marshalNoHTML(map[string]any{"success": true, "tabId": a.TabID, "title": title, "url": url})}},
+			}
 		default:
 			msg["error"] = map[string]any{"code": -32601, "message": "tool not found"}
+		}
+		// C-8: keep content[0].text a SMALL page and carry the excess in an
+		// ignored field, so 001 (no transport cap) still returns 200 and the
+		// P10 failure is by the missing capability, not the wrong reason.
+		if f.transportHuge > 0 {
+			msg["padding"] = strings.Repeat("x", f.transportHuge)
 		}
 	default:
 		msg["error"] = map[string]any{"code": -32601, "message": "method not found"}
@@ -413,4 +499,58 @@ func argTabID(args json.RawMessage) int {
 	}
 	_ = json.Unmarshal(args, &a)
 	return a.TabID
+}
+
+// ---------------------------------------------------------------------------
+// fb-025-002 fake helpers (spec §3.4)
+// ---------------------------------------------------------------------------
+
+// readyStateProbe is the exact eval code that reads document.readyState.
+const readyStateProbe = "document.readyState"
+
+// discardedCandidateMsg is the generic Firefox message surfaced for an
+// inactive/discarded tab (spec 002 §3.4 #1, §3.5.1).
+const discardedCandidateMsg = "An unexpected error occurred"
+
+// argCode extracts the `code` argument of a vlp_eval call (spec §3.4).
+func argCode(args json.RawMessage) string {
+	var a struct {
+		Code string `json:"code"`
+	}
+	_ = json.Unmarshal(args, &a)
+	return a.Code
+}
+
+// isReadyStateProbe reports whether an eval code is the readyState probe
+// (H7: exact match after trim, so it never depends on the page marker).
+func isReadyStateProbe(code string) bool {
+	return strings.TrimSpace(code) == readyStateProbe
+}
+
+// nextReadyState pops the programmed readyState sequence; the last value
+// repeats, and an empty sequence yields "complete" (spec §3.4 #4). Must be
+// called with f.mu held.
+func (f *fakeMCP) nextReadyState() string {
+	if len(f.readyStates) > 0 {
+		s := f.readyStates[0]
+		f.readyStates = f.readyStates[1:]
+		f.lastReadyState = s
+		return s
+	}
+	if f.lastReadyState != "" {
+		return f.lastReadyState
+	}
+	return "complete"
+}
+
+// tabInfo returns the title/url the extension reports for a tab id.
+func (f *fakeMCP) tabInfo(id int) (title, url string) {
+	for _, t := range f.tabs {
+		if v, ok := t["id"].(int); ok && v == id {
+			title, _ = t["title"].(string)
+			url, _ = t["url"].(string)
+			return title, url
+		}
+	}
+	return "", ""
 }
