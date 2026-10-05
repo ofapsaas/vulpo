@@ -23,7 +23,7 @@ func TestR12_InvariantsDuringRecovery(t *testing.T) {
 		f.navigateRecovers = true
 		f.callDelay = 150 * time.Millisecond // widen the overlap window
 	})
-	f.addPage("/app/x", fakePage{status: 200, ct: "application/json", body: sampleRPCResponse, url: "https://www.odoo.sh/app/x"})
+	f.addPage("/app/project/x/get_info", fakePage{status: 200, ct: "application/json", body: sampleRPCResponse, url: "https://www.odoo.sh/app/project/x/get_info"})
 	env := recoveryEnv(t, f, nil)
 	startProxy(t, env)
 
@@ -36,7 +36,7 @@ func TestR12_InvariantsDuringRecovery(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			results[i], errs[i] = proxyClientDoErr(env, "POST", "/app/x", sampleRPCRequest, map[string]string{
+			results[i], errs[i] = proxyClientDoErr(env, "POST", "/app/project/x/get_info", sampleRPCRequest, map[string]string{
 				"Cookie": "session_id=" + sentinelCookie,
 			})
 		}(i)

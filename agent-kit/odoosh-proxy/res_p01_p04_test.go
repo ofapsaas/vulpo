@@ -18,11 +18,11 @@ func TestR1a_DiscardedRecoveredNoFocus(t *testing.T) {
 		f.discardedTab = 22
 		f.navigateRecovers = true
 	})
-	f.addPage("/app/x", fakePage{status: 200, ct: "application/json", body: sampleRPCResponse, url: "https://www.odoo.sh/app/x"})
+	f.addPage("/app/project/x/get_info", fakePage{status: 200, ct: "application/json", body: sampleRPCResponse, url: "https://www.odoo.sh/app/project/x/get_info"})
 	env := recoveryEnv(t, f, nil)
 	startProxy(t, env)
 
-	res := proxyClientDo(t, env, "POST", "/app/x", sampleRPCRequest, nil)
+	res := proxyClientDo(t, env, "POST", "/app/project/x/get_info", sampleRPCRequest, nil)
 	requireFakeReached(t, f)
 	expectStatus(t, res, 200)
 	if string(res.Body) != sampleRPCResponse {
@@ -69,14 +69,14 @@ func p2Resilience(t *testing.T, allowFocus bool, activateRecovers bool) (*fakeMC
 		f.navigateRecovers = false
 		f.activateRecovers = activateRecovers
 	})
-	f.addPage("/app/x", fakePage{status: 200, ct: "application/json", body: sampleRPCResponse, url: "https://www.odoo.sh/app/x"})
+	f.addPage("/app/project/x/get_info", fakePage{status: 200, ct: "application/json", body: sampleRPCResponse, url: "https://www.odoo.sh/app/project/x/get_info"})
 	extra := map[string]string{}
 	if allowFocus {
 		extra["VLP_RECOVER_ALLOW_FOCUS"] = "1"
 	}
 	env := recoveryEnv(t, f, extra)
 	startProxy(t, env)
-	res := proxyClientDo(t, env, "POST", "/app/x", sampleRPCRequest, nil)
+	res := proxyClientDo(t, env, "POST", "/app/project/x/get_info", sampleRPCRequest, nil)
 	requireFakeReached(t, f)
 	return f, res
 }
@@ -115,11 +115,11 @@ func TestR3a_WaitReadyComplete(t *testing.T) {
 		f.navigateRecovers = true
 		f.readyStates = []string{"loading", "complete"}
 	})
-	f.addPage("/app/x", fakePage{status: 200, ct: "application/json", body: sampleRPCResponse, url: "https://www.odoo.sh/app/x"})
+	f.addPage("/app/project/x/get_info", fakePage{status: 200, ct: "application/json", body: sampleRPCResponse, url: "https://www.odoo.sh/app/project/x/get_info"})
 	env := recoveryEnv(t, f, nil)
 	startProxy(t, env)
 
-	res := proxyClientDo(t, env, "POST", "/app/x", sampleRPCRequest, nil)
+	res := proxyClientDo(t, env, "POST", "/app/project/x/get_info", sampleRPCRequest, nil)
 	requireFakeReached(t, f)
 	expectStatus(t, res, 200)
 	if got := probeCount(f); got < 2 {
@@ -137,14 +137,14 @@ func TestR3b_DeadlineExhausted(t *testing.T) {
 		f.navigateRecovers = true
 		f.readyStates = []string{"loading"} // never complete
 	})
-	f.addPage("/app/x", fakePage{status: 200, ct: "application/json", body: sampleRPCResponse, url: "https://www.odoo.sh/app/x"})
+	f.addPage("/app/project/x/get_info", fakePage{status: 200, ct: "application/json", body: sampleRPCResponse, url: "https://www.odoo.sh/app/project/x/get_info"})
 	env := recoveryEnv(t, f, map[string]string{
 		"VLP_RECOVER_READY_DEADLINE_MS": "300",
 		"VLP_RECOVER_READY_POLL_MS":     "50",
 	})
 	startProxy(t, env)
 
-	res := proxyClientDo(t, env, "POST", "/app/x", sampleRPCRequest, nil)
+	res := proxyClientDo(t, env, "POST", "/app/project/x/get_info", sampleRPCRequest, nil)
 	requireFakeReached(t, f)
 	expectStatus(t, res, 502)
 
@@ -174,11 +174,11 @@ func TestR4a_BoundedCycleNoFocus(t *testing.T) {
 		f.navigateRecovers = false
 		f.activateRecovers = false
 	})
-	f.addPage("/app/x", fakePage{status: 200, ct: "application/json", body: sampleRPCResponse, url: "https://www.odoo.sh/app/x"})
+	f.addPage("/app/project/x/get_info", fakePage{status: 200, ct: "application/json", body: sampleRPCResponse, url: "https://www.odoo.sh/app/project/x/get_info"})
 	env := recoveryEnv(t, f, nil)
 	startProxy(t, env)
 
-	res := proxyClientDo(t, env, "POST", "/app/x", sampleRPCRequest, nil)
+	res := proxyClientDo(t, env, "POST", "/app/project/x/get_info", sampleRPCRequest, nil)
 	requireFakeReached(t, f)
 	expectStatus(t, res, 502)
 	expectContains(t, "body", string(res.Body), litRecoveryFailed)
@@ -203,11 +203,11 @@ func TestR4b_BoundedCycleFocus(t *testing.T) {
 		f.navigateRecovers = false
 		f.activateRecovers = false
 	})
-	f.addPage("/app/x", fakePage{status: 200, ct: "application/json", body: sampleRPCResponse, url: "https://www.odoo.sh/app/x"})
+	f.addPage("/app/project/x/get_info", fakePage{status: 200, ct: "application/json", body: sampleRPCResponse, url: "https://www.odoo.sh/app/project/x/get_info"})
 	env := recoveryEnv(t, f, map[string]string{"VLP_RECOVER_ALLOW_FOCUS": "1"})
 	startProxy(t, env)
 
-	res := proxyClientDo(t, env, "POST", "/app/x", sampleRPCRequest, nil)
+	res := proxyClientDo(t, env, "POST", "/app/project/x/get_info", sampleRPCRequest, nil)
 	requireFakeReached(t, f)
 	expectStatus(t, res, 502)
 	expectContains(t, "body", string(res.Body), litRecoveryFailed)

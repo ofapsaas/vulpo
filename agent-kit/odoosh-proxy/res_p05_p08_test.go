@@ -24,7 +24,11 @@ func r5EvalError(t *testing.T, msg string) (*fakeMCP, httpResult) {
 }
 
 // r5Recovers drives a discarded tab whose navigate clears the discard -> 200.
-func r5Recovers(t *testing.T, raw string) (*fakeMCP, httpResult) {
+// C-1 (fb-025-003, ratified HITL 2026-10-05): the caller pins the route. The
+// generic-candidate witness (TestR5a) is re-pointed to a READ route because the
+// 003 guard restricts recovery to read; the host-permission witness (TestR5b)
+// stays on /app/x (D-2: host-permission recovers on every route).
+func r5Recovers(t *testing.T, raw, path string) (*fakeMCP, httpResult) {
 	t.Helper()
 	f := newFakeMCP(t)
 	f.set(func(f *fakeMCP) {
@@ -33,16 +37,16 @@ func r5Recovers(t *testing.T, raw string) (*fakeMCP, httpResult) {
 		f.discardedMsg = raw
 		f.navigateRecovers = true
 	})
-	f.addPage("/app/x", fakePage{status: 200, ct: "application/json", body: sampleRPCResponse, url: "https://www.odoo.sh/app/x"})
+	f.addPage(path, fakePage{status: 200, ct: "application/json", body: sampleRPCResponse, url: "https://www.odoo.sh" + path})
 	env := recoveryEnv(t, f, nil)
 	startProxy(t, env)
-	res := proxyClientDo(t, env, "POST", "/app/x", sampleRPCRequest, nil)
+	res := proxyClientDo(t, env, "POST", path, sampleRPCRequest, nil)
 	requireFakeReached(t, f)
 	return f, res
 }
 
 func TestR5a_CandidateRecovers(t *testing.T) {
-	f, res := r5Recovers(t, rawCandidate)
+	f, res := r5Recovers(t, rawCandidate, "/app/project/x/get_info")
 	expectStatus(t, res, 200)
 	if got := navigateCount(f); got < 1 {
 		t.Errorf("fb-025-002 %s: candidate -32000 did not trigger recovery (navigate=%d)", t.Name(), got)
@@ -50,7 +54,7 @@ func TestR5a_CandidateRecovers(t *testing.T) {
 }
 
 func TestR5b_HostPermissionRecovers(t *testing.T) {
-	f, res := r5Recovers(t, rawHostPerm)
+	f, res := r5Recovers(t, rawHostPerm, "/app/x")
 	expectStatus(t, res, 200)
 	if got := navigateCount(f); got < 1 {
 		t.Errorf("fb-025-002 %s: 'Missing host permission' candidate did not trigger recovery (navigate=%d)", t.Name(), got)
