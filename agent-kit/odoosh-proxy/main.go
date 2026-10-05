@@ -1,52 +1,49 @@
 // Command vlp-odoosh-proxy is the read-only proxy that replaces
 // https://www.odoo.sh in the egress of odoosh-mcp and translates its control
 // plane into a synchronous evaluation inside an authenticated odoo.sh tab via
-// Vulpo (vlp_eval).
+// Vulpo (vlp_eval) (fb-025-001-proxy-readonly, spec v1 §3).
 //
-// This file is the RED scaffold for fb-025-001-proxy-readonly: it only brings
-// up an HTTP server that answers 404 to every request. The real behavior
-// (allowlist, healthcheck, MCP transport, cookie discard, error mapping) is
-// implemented in GREEN.
+// It reads the token from a 0600 file, keeps the MCP session only in memory,
+// discards the incoming Cookie and never emits the token.
 package main
 
 import (
+	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
 )
 
-const (
-	defaultBind = "127.0.0.1"
-	defaultPort = "8899"
-)
-
-// placeholderHandler answers 404 to every request: no behavior yet.
-func placeholderHandler(w http.ResponseWriter, r *http.Request) {
-	http.NotFound(w, r)
-}
+var version = "dev"
 
 func main() {
-	bind := envOr("VLP_PROXY_BIND", defaultBind)
-	port := envOr("VLP_PROXY_PORT", defaultPort)
-
-	addr := net.JoinHostPort(bind, port)
-	srv := &http.Server{
-		Addr:    addr,
-		Handler: http.HandlerFunc(placeholderHandler),
-	}
-
-	log.Printf("vlp-odoosh-proxy listening on %s", addr)
-	if err := srv.ListenAndServe(); err != nil {
-		log.Fatalf("vlp-odoosh-proxy: %v", err)
+	if err := run(); err != nil {
+		log.Printf("vlp-odoosh-proxy: %v", err)
+		os.Exit(1)
 	}
 }
 
-// envOr returns the value of the environment variable named key, or def when
-// the variable is unset or empty.
-func envOr(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+func run() error {
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
 	}
-	return def
+	// Fail loud on a non-loopback bind without the explicit opt-in (spec §3.2).
+	if !isLoopback(cfg.bind) && !cfg.allowNonLoopback {
+		return fmt.Errorf("refusing non-loopback bind %q without VLP_PROXY_ALLOW_NON_LOOPBACK=1", cfg.bind)
+	}
+	// Fail loud on an unreadable token or a mode other than 0600 (spec §3.2).
+	token, err := readToken(cfg.tokenFile)
+	if err != nil {
+		return err
+	}
+
+	addr := net.JoinHostPort(cfg.bind, cfg.port)
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: newProxy(cfg, newMCPClient(cfg.url, token, cfg.evalTimeout)),
+	}
+	log.Printf("vlp-odoosh-proxy listening on %s", addr)
+	return srv.ListenAndServe()
 }
