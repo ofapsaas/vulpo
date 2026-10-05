@@ -28,7 +28,7 @@ set -euo pipefail
 # ── Rutas derivadas de BASH_SOURCE ──────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"   # src/
-REPO_ROOT="$(cd "$SRC_ROOT/.." && pwd)"    # repo padre (foxbridge)
+REPO_ROOT="$(cd "$SRC_ROOT/.." && pwd)"    # repo padre del workspace
 
 # ── Requisitos ──────────────────────────────────────────────────────────────
 need() {
@@ -207,7 +207,7 @@ p7_unit() {
   set -euo pipefail
   local unit="$REPO_ROOT/docs/epics/fb-025-odoosh-mcp-proxy/vlp-odoosh-proxy.service"
   [[ -f "$unit" ]] || {
-    af "no existe la unidad $unit — coupling cross-repo (§3.8.5): correr el smoke desde el repo padre (foxbridge)"
+    af "no existe la unidad $unit — coupling cross-repo (§3.8.5): correr el smoke desde el repo padre del workspace"
     return 1
   }
   grep -q '%h' "$unit" || { af "la unidad no contiene %h"; return 1; }
