@@ -153,7 +153,7 @@ the full tool guide.
 ### The `odoosh-mcp` proxy
 
 `odoosh-mcp` can reach an authenticated `odoo.sh` session through the
-read-only proxy `vlp-odoosh-proxy`, which ships with the agent kit. It is a
+pass-through proxy `vlp-odoosh-proxy`, which ships with the agent kit. It is a
 per-host user service, not a per-agent CLI. See
 [Odoo.sh proxy](odoosh-proxy.md) for requirements, build, install, the user
 service, the configuration table and health checks.

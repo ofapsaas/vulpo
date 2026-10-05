@@ -1,4 +1,4 @@
-// Command vlp-odoosh-proxy is the read-only proxy that replaces
+// Command vlp-odoosh-proxy is the HTTP proxy that replaces
 // https://www.odoo.sh in the egress of odoosh-mcp and translates its control
 // plane into a synchronous evaluation inside an authenticated odoo.sh tab via
 // Vulpo (vlp_eval) (fb-025-001-proxy-readonly, spec v1 §3).

@@ -129,6 +129,6 @@ reloads.
 request with `{ts, method, tool, ms, exit}`. It never contains arguments, results
 or the token.
 
-**Odoo.sh proxy.** For the read-only `vlp-odoosh-proxy` that connects
+**Odoo.sh proxy.** For the pass-through `vlp-odoosh-proxy` that connects
 `odoosh-mcp` to an authenticated `odoo.sh` session, see the troubleshooting
 section of [Odoo.sh proxy](odoosh-proxy.md).
