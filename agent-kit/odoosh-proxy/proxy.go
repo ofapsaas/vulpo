@@ -106,7 +106,7 @@ func (p *proxy) handleApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if rpcErr != nil {
-		p.handleToolError(w, rpcErr, tabID, tabURL, code)
+		p.handleToolError(w, rpcErr, path, tabID, tabURL, code)
 		return
 	}
 	p.writePage(w, pg)
@@ -222,14 +222,24 @@ type toolClass struct {
 	status  int
 	prefix  string
 	recover bool // a candidate for a discarded tab (D-1)
+	// preExec marks a candidate that is pre-execution: the injection failed, so
+	// the XHR never ran and recovery cannot duplicate a write (D-2). Such a
+	// candidate recovers on every route; a recover candidate without preExec is
+	// ambiguous (may be post-execution) and recovers only on a READ route.
+	preExec bool
 }
 
 // classifyToolMessage maps a tool error message to the closed table. A message
 // outside the table is a generic 502 that never recovers (D-11, I-13).
 func classifyToolMessage(msg string) toolClass {
 	switch {
-	case strings.Contains(msg, "An unexpected error occurred"),
-		strings.Contains(msg, "Missing host permission for the tab"):
+	case strings.Contains(msg, "Missing host permission for the tab"):
+		// Pre-execution heuristic (D-2): the injection failed, so the XHR never
+		// ran -> recovery is safe on every route.
+		return toolClass{recover: true, preExec: true}
+	case strings.Contains(msg, "An unexpected error occurred"):
+		// Ambiguous (D-2): the eval may have run and lost its response ->
+		// recovery is restricted to READ routes (D-1).
 		return toolClass{recover: true}
 	case strings.Contains(msg, "command_timeout:"):
 		return toolClass{status: http.StatusGatewayTimeout, prefix: "hub idle timeout: "}
@@ -250,11 +260,37 @@ func classifyToolMessage(msg string) toolClass {
 	}
 }
 
+// isReadRoute reports whether the request path is a READ route (recovery allowed).
+// Conservative: exact segment count + fixed tail; anything else is non-read
+// (spec §3.4, D-12). It governs ONLY the retry, never the passthrough surface
+// (D-13/I-15).
+func isReadRoute(path string) bool {
+	seg := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	switch {
+	case len(seg) == 2 && seg[0] == "app" && seg[1] == "projects":
+		return true // R1
+	case len(seg) == 4 && seg[0] == "app" && seg[1] == "project" && seg[2] != "" &&
+		(seg[3] == "get_info" || seg[3] == "get_settings" || seg[3] == "status" ||
+			seg[3] == "branches" || seg[3] == "builds_per_branch" || seg[3] == "backups" ||
+			seg[3] == "audit_logs"):
+		return true // R2–R8
+	case len(seg) == 4 && seg[0] == "app" && seg[1] == "branch" && seg[2] != "" &&
+		(seg[3] == "history" || seg[3] == "get_settings"):
+		return true // R9–R10
+	case len(seg) == 4 && seg[0] == "app" && seg[1] == "build" && seg[2] != "" && seg[3] == "errors":
+		return true // R11
+	case len(seg) == 3 && seg[0] == "app" && seg[1] == "github" && seg[2] == "get_user_profile":
+		return true // R12
+	default:
+		return false // unknown / write / ambiguous -> NON-read (fail-safe)
+	}
+}
+
 // handleToolError classifies a tool error and, for a discarded-tab candidate,
 // runs one bounded recovery cycle. Every classified body antepones a semantic
 // mark to the raw message, which is always preserved as a substring
 // (spec §3.5.1/C-10).
-func (p *proxy) handleToolError(w http.ResponseWriter, rpcErr *rpcError, tabID int, tabURL, code string) {
+func (p *proxy) handleToolError(w http.ResponseWriter, rpcErr *rpcError, path string, tabID int, tabURL, code string) {
 	cls := classifyToolMessage(rpcErr.Message)
 	if !cls.recover {
 		writeError(w, cls.status, cls.prefix+rpcErr.Message)
@@ -262,8 +298,18 @@ func (p *proxy) handleToolError(w http.ResponseWriter, rpcErr *rpcError, tabID i
 	}
 	if !p.cfg.recoverOnAmbiguous {
 		// D-7 of 001 preserved: an ambiguous -32000 with recovery off is a
-		// plain 502 carrying the raw message.
+		// plain 502 carrying the raw message. This master switch disables ALL
+		// recovery, including the pre-execution host-permission candidate (P6
+		// of 002 preserved).
 		writeError(w, http.StatusBadGateway, rpcErr.Message)
+		return
+	}
+	// Route guard (D-1/D-2, I-14): a generic (ambiguous) candidate recovers
+	// only on a READ route, unless the operator opted in with
+	// VLP_RECOVER_ON_WRITE=1. A non-read or unknown route never re-emits the
+	// eval by default. The pre-execution candidate recovers on every route.
+	if !cls.preExec && !isReadRoute(path) && !p.cfg.recoverOnWrite {
+		writeError(w, http.StatusBadGateway, "recovery not attempted for non-read route: "+rpcErr.Message)
 		return
 	}
 	p.recoverTab(w, tabID, tabURL, code, rpcErr.Message)

@@ -26,8 +26,12 @@ type config struct {
 	allowNonLoopback bool
 
 	// fb-025-002 resilience knobs (spec §3.2).
-	recoverOnAmbiguous   bool
-	recoverAllowFocus    bool
+	recoverOnAmbiguous bool
+	recoverAllowFocus  bool
+	// fb-025-003 route guard knob (spec §3.2/D-3): opt-in recovery on non-read
+	// routes. Default false (safe): a generic candidate on a non-read route is
+	// never re-emitted.
+	recoverOnWrite       bool
 	recoverReadyDeadline time.Duration
 	recoverReadyPoll     time.Duration
 	transportMaxBytes    int64
@@ -83,6 +87,10 @@ func loadConfig() (config, error) {
 	if err != nil {
 		return config{}, err
 	}
+	recoverOnWrite, err := envFlag("VLP_RECOVER_ON_WRITE", false)
+	if err != nil {
+		return config{}, err
+	}
 	return config{
 		bind:             envOr("VLP_PROXY_BIND", "127.0.0.1"),
 		port:             envOr("VLP_PROXY_PORT", "8899"),
@@ -96,6 +104,7 @@ func loadConfig() (config, error) {
 
 		recoverOnAmbiguous:   recoverOnAmbiguous,
 		recoverAllowFocus:    recoverAllowFocus,
+		recoverOnWrite:       recoverOnWrite,
 		recoverReadyDeadline: recoverDeadline,
 		recoverReadyPoll:     recoverPoll,
 		transportMaxBytes:    transportMax,
