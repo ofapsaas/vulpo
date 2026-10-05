@@ -11,8 +11,9 @@
 # la invocación (límite honesto PD-15, declarado como en el AUDIT).
 #
 # ── Naturaleza RED esperada (spec §3.3 / audit §4.3) ────────────────────────
-#  · FALLAN: P1 (el tarball no trae bin/vlp-odoosh-proxy), P2 (install.sh no lo
-#    instala), P3 (no hay binario que arrancar), P7 (la unidad no existe).
+#  · FALLAN: P1 (el tarball no trae bin/vlp-odoosh-proxy ni la unidad), P2
+#    (install.sh no lo instala), P3 (no hay binario que arrancar), P7 (la unidad
+#    no existe en el producto).
 #  · PASA: P8 (regresión `go test ./...` = 101/101).
 #
 # ── Condiciones clave ───────────────────────────────────────────────────────
@@ -21,14 +22,14 @@
 #    PASS/FAIL; exit 0 sólo si todo pasó.
 #  · C-5: todo temporal vive bajo `$HOME/tmp` (NUNCA `/tmp`); `trap` mata el
 #    proxy y limpia `$WORK`.
-#  · C-9: P7 acopla al repo padre; si la unidad no está ⇒ fail-loud con mensaje
-#    claro (paso FAIL, no abort).
+#  · C-9: P7 apunta a la unidad del PRODUCTO (src/agent-kit/odoosh-proxy/), que
+#    viaja en el tarball del kit (fix F1); si no está ⇒ fail-loud con mensaje
+#    claro (paso FAIL, no abort). Sin coupling al repo padre.
 set -euo pipefail
 
 # ── Rutas derivadas de BASH_SOURCE ──────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SRC_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"   # src/
-REPO_ROOT="$(cd "$SRC_ROOT/.." && pwd)"    # repo padre del workspace
+SRC_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"   # src/ (producto)
 
 # ── Requisitos ──────────────────────────────────────────────────────────────
 need() {
@@ -112,8 +113,13 @@ p1_build_tarball() {
   [[ "$ftype" == *"statically linked"* ]] || { af "file -b dice '$ftype' (esperado 'statically linked')"; return 1; }
   [[ "$ftype" != *"dynamically linked"* ]] || { af "file -b dice '$ftype' (NO debe ser 'dynamically linked')"; return 1; }
 
+  # F1 (spec §3.4/§6.6): la unidad systemd viaja DENTRO del tarball del kit.
+  local unit="$WORK/extract/$name/vlp-odoosh-proxy.service"
+  [[ -f "$unit" ]] || { af "el tarball NO incluye $name/vlp-odoosh-proxy.service (F1: la unidad debe viajar en el kit)"; return 1; }
+
   echo "  tarball: $tarball"
   echo "  binario: $name/bin/vlp-odoosh-proxy → $ftype"
+  echo "  unidad:  $name/vlp-odoosh-proxy.service"
 }
 
 # ── P2 (T-install): install.sh deja ~/.local/bin/vlp-odoosh-proxy (0755) ────
@@ -205,9 +211,9 @@ p3_smoke() {
 # ── P7 (unidad): portable (%h; Restart=; WantedBy=; sin absolutos/extra) ────
 p7_unit() {
   set -euo pipefail
-  local unit="$REPO_ROOT/docs/epics/fb-025-odoosh-mcp-proxy/vlp-odoosh-proxy.service"
+  local unit="$SRC_ROOT/agent-kit/odoosh-proxy/vlp-odoosh-proxy.service"
   [[ -f "$unit" ]] || {
-    af "no existe la unidad $unit — coupling cross-repo (§3.8.5): correr el smoke desde el repo padre del workspace"
+    af "no existe la unidad del producto $unit (F1: la unidad debe vivir en src/agent-kit/odoosh-proxy/)"
     return 1
   }
   grep -q '%h' "$unit" || { af "la unidad no contiene %h"; return 1; }
