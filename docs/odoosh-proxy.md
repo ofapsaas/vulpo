@@ -4,6 +4,15 @@
 authenticated `odoo.sh` tab through Vulpo. It is a transparent pass-through:
 the write ceiling lives on the `odoosh-mcp` side, not in the proxy.
 
+It exists only to serve `odoosh-mcp` — an independent, MIT-licensed upstream
+project by **Hugo Adan Oliva**, published on PyPI as
+[`odoosh-mcp-server`](https://pypi.org/project/odoosh-mcp-server/). That server
+administers `odoo.sh` projects agentically and, by default, talks to the web app
+with a session cookie of its own. This proxy is its companion: it moves that
+control plane into an already authenticated `odoo.sh` tab, where the browser
+attaches the cookie, so no file holds it. Nothing from the upstream project is
+vendored here.
+
 ## What it is
 
 `vlp-odoosh-proxy` is a long-lived, per-host proxy. It replaces the direct
@@ -143,11 +152,3 @@ Without a browser or a server the proxy still starts and `/healthz` answers
   the proxy needs **Build** mode to evaluate.
 - **The contract suite fails.** Run `cd agent-kit/odoosh-proxy && go test ./...`
   from the repository.
-
-## Upstream
-
-`odoosh-mcp` is an independent, MIT-licensed upstream project by
-**Hugo Adan Oliva**, published on PyPI as
-[`odoosh-mcp-server`](https://pypi.org/project/odoosh-mcp-server/). This proxy
-is a companion to it: it is not part of that project, and nothing from it is
-vendored here.
