@@ -1,0 +1,27 @@
+# vlp-odoosh-proxy.service — proxy odoosh-mcp ↔ Vulpo (fb-025-004)
+#
+# Instalación:
+#   cp vlp-odoosh-proxy.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now vlp-odoosh-proxy.service
+#   systemctl --user status vlp-odoosh-proxy.service
+#
+# Requisitos previos: ~/.config/vulpo/token (mode 0600) y el server vlpsrv
+# corriendo en VLP_URL (default http://127.0.0.1:8765/mcp).
+
+[Unit]
+Description=Vulpo odoosh-mcp proxy (odoosh-mcp ↔ Firefox session)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/vlp-odoosh-proxy
+Environment=VLP_TOKEN_FILE=%h/.config/vulpo/token
+Environment=VLP_URL=http://127.0.0.1:8765/mcp
+Environment=VLP_PROXY_PORT=8899
+Environment=VLP_TAB_URL_PREFIX=https://www.odoo.sh
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

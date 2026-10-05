@@ -11,7 +11,8 @@
 # a build/commit number; the commit is carried separately as kitRevision).
 # The tarball holds a top-level
 # vulpo-agent-kit-<v>/ with bin/vlpmcp (static linux/amd64), skills/,
-# integrations/, install.sh, VERSION and README.md. Staging happens in $HOME/tmp.
+# integrations/, install.sh, vlp-odoosh-proxy.service, VERSION and README.md.
+# Staging happens in $HOME/tmp.
 #
 # Exit codes: 0 OK · 1 usage/missing tool · 2 build failed · 3 tarball not found
 
@@ -64,7 +65,7 @@ if [[ $CHECK -eq 1 ]]; then
 fi
 
 need go
-for required in cli/main.go odoosh-proxy/main.go skills install.sh integrations/register-opencode.sh; do
+for required in cli/main.go odoosh-proxy/main.go odoosh-proxy/vlp-odoosh-proxy.service skills install.sh integrations/register-opencode.sh; do
     [[ -e "$KIT_SRC/$required" ]] || die 2 "missing $KIT_SRC/$required"
 done
 
@@ -99,6 +100,9 @@ fi
 cp -R "$KIT_SRC/skills" "$STAGE/skills"
 cp -R "$KIT_SRC/integrations" "$STAGE/integrations"
 install -m 0755 "$KIT_SRC/install.sh" "$STAGE/install.sh"
+# fb-025-004 (fix F1): the systemd unit travels with the kit (the product
+# owns it); install.sh copies it to the share dir and the operator installs it.
+install -m 0644 "$KIT_SRC/odoosh-proxy/vlp-odoosh-proxy.service" "$STAGE/vlp-odoosh-proxy.service"
 chmod 0755 "$STAGE"/integrations/*.sh
 printf '%s\n' "$VERSION" > "$STAGE/VERSION"
 
@@ -110,6 +114,7 @@ through MCP) without ever handling the token:
 
 - \`bin/vlpmcp\`: the CLI and MCP stdio bridge (static linux/amd64 binary).
 - \`bin/vlp-odoosh-proxy\`: the read-only proxy for \`odoosh-mcp\` (static linux/amd64 binary).
+- \`vlp-odoosh-proxy.service\`: the user unit for \`vlp-odoosh-proxy\` (installed into the kit share dir).
 - \`skills/\`: the \`vulpo\`, \`vulpo-web-navigation\` and \`vulpo-odoo-web\` skills.
 - \`integrations/register-opencode.sh\`: registers \`vlpmcp mcp-stdio\` in OpenCode.
 - \`install.sh\`: installs the kit for the current user.

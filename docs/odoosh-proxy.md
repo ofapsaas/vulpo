@@ -66,12 +66,13 @@ version.
 
 ## Run as a user service
 
-The repository ships the unit `vlp-odoosh-proxy.service`. Install it as a user
-unit:
+The kit tarball ships the unit `vlp-odoosh-proxy.service`; `install.sh` copies
+it to `~/.local/share/vulpo-agent-kit/<version>/`. Install it as a user unit
+from that path:
 
 ```bash
 mkdir -p ~/.config/systemd/user
-cp vlp-odoosh-proxy.service ~/.config/systemd/user/
+cp ~/.local/share/vulpo-agent-kit/<version>/vlp-odoosh-proxy.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now vlp-odoosh-proxy.service
 systemctl --user status vlp-odoosh-proxy.service

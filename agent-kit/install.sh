@@ -6,8 +6,13 @@
 #
 # Installs:
 #   ~/.local/bin/vlpmcp                                (0755)
-#   ~/.local/share/vulpo-agent-kit/<version>/     (skills, integrations, VERSION)
+#   ~/.local/bin/vlp-odoosh-proxy                      (0755)
+#   ~/.local/share/vulpo-agent-kit/<version>/     (skills, integrations, VERSION,
+#                                                  vlp-odoosh-proxy.service)
 #   ~/.config/opencode/skills/<skill>/                (only if ~/.config/opencode exists)
+#
+# It never installs the systemd unit: copying vlp-odoosh-proxy.service into
+# ~/.config/systemd/user/ is an operator step (D-2).
 
 set -euo pipefail
 
@@ -18,6 +23,7 @@ KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -f "$KIT_DIR/VERSION" ]] || die "VERSION not found in $KIT_DIR (run install.sh from an extracted kit)"
 [[ -f "$KIT_DIR/bin/vlpmcp" ]] || die "bin/vlpmcp not found in $KIT_DIR"
 [[ -f "$KIT_DIR/bin/vlp-odoosh-proxy" ]] || die "bin/vlp-odoosh-proxy not found in $KIT_DIR"
+[[ -f "$KIT_DIR/vlp-odoosh-proxy.service" ]] || die "vlp-odoosh-proxy.service not found in $KIT_DIR"
 [[ -d "$KIT_DIR/skills" ]] || die "skills/ not found in $KIT_DIR"
 
 VERSION="$(tr -d '[:space:]' < "$KIT_DIR/VERSION")"
@@ -40,8 +46,12 @@ if [[ "$(realpath "$KIT_DIR")" != "$(realpath -m "$SHARE_DIR")" ]]; then
     rm -rf "$SHARE_DIR"
     mkdir -p "$SHARE_DIR"
     cp -R "$KIT_DIR/." "$SHARE_DIR/"
+    # fb-025-004 (fix F1): the unit ships with the kit; copy it to the share
+    # dir but never install it into systemd (operator step, D-2).
+    install -m 0644 "$KIT_DIR/vlp-odoosh-proxy.service" "$SHARE_DIR/vlp-odoosh-proxy.service"
 fi
 echo "kit:       $SHARE_DIR"
+echo "unit:      $SHARE_DIR/vlp-odoosh-proxy.service"
 
 if [[ -d "$OPENCODE_DIR" ]]; then
     mkdir -p "$OPENCODE_DIR/skills"
