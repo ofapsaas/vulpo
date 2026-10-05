@@ -64,7 +64,7 @@ if [[ $CHECK -eq 1 ]]; then
 fi
 
 need go
-for required in cli/main.go skills install.sh integrations/register-opencode.sh; do
+for required in cli/main.go odoosh-proxy/main.go skills install.sh integrations/register-opencode.sh; do
     [[ -e "$KIT_SRC/$required" ]] || die 2 "missing $KIT_SRC/$required"
 done
 
@@ -91,6 +91,11 @@ fi
     go build -ldflags "$LDFLAGS" -o "$STAGE/bin/vlpmcp" . ) \
     || die 2 "go build of vlpmcp failed"
 
+# fb-025-004: same static recipe as vlpmcp for the odoosh-mcp proxy.
+( cd "$KIT_SRC/odoosh-proxy" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 TMPDIR="$STAGE_ROOT" \
+    go build -ldflags "$LDFLAGS" -o "$STAGE/bin/vlp-odoosh-proxy" . ) \
+    || die 2 "go build of vlp-odoosh-proxy failed"
+
 cp -R "$KIT_SRC/skills" "$STAGE/skills"
 cp -R "$KIT_SRC/integrations" "$STAGE/integrations"
 install -m 0755 "$KIT_SRC/install.sh" "$STAGE/install.sh"
@@ -104,6 +109,7 @@ Everything an agent account needs to use Vulpo (drive a Firefox browser
 through MCP) without ever handling the token:
 
 - \`bin/vlpmcp\`: the CLI and MCP stdio bridge (static linux/amd64 binary).
+- \`bin/vlp-odoosh-proxy\`: the read-only proxy for \`odoosh-mcp\` (static linux/amd64 binary).
 - \`skills/\`: the \`vulpo\`, \`vulpo-web-navigation\` and \`vulpo-odoo-web\` skills.
 - \`integrations/register-opencode.sh\`: registers \`vlpmcp mcp-stdio\` in OpenCode.
 - \`install.sh\`: installs the kit for the current user.

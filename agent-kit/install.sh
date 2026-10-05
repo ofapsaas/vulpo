@@ -17,6 +17,7 @@ KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 [[ -f "$KIT_DIR/VERSION" ]] || die "VERSION not found in $KIT_DIR (run install.sh from an extracted kit)"
 [[ -f "$KIT_DIR/bin/vlpmcp" ]] || die "bin/vlpmcp not found in $KIT_DIR"
+[[ -f "$KIT_DIR/bin/vlp-odoosh-proxy" ]] || die "bin/vlp-odoosh-proxy not found in $KIT_DIR"
 [[ -d "$KIT_DIR/skills" ]] || die "skills/ not found in $KIT_DIR"
 
 VERSION="$(tr -d '[:space:]' < "$KIT_DIR/VERSION")"
@@ -29,6 +30,11 @@ OPENCODE_DIR="$HOME/.config/opencode"
 mkdir -p "$BIN_DIR"
 install -m 0755 "$KIT_DIR/bin/vlpmcp" "$BIN_DIR/vlpmcp"
 echo "installed: $BIN_DIR/vlpmcp ($("$BIN_DIR/vlpmcp" version))"
+
+# fb-025-004 D-3: install the proxy too, but never print its version
+# (the binary has no version subcommand; printing it would need main.go).
+install -m 0755 "$KIT_DIR/bin/vlp-odoosh-proxy" "$BIN_DIR/vlp-odoosh-proxy"
+echo "installed: $BIN_DIR/vlp-odoosh-proxy"
 
 if [[ "$(realpath "$KIT_DIR")" != "$(realpath -m "$SHARE_DIR")" ]]; then
     rm -rf "$SHARE_DIR"

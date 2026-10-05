@@ -150,6 +150,14 @@ vlpmcp call vlp_act '{"tabId":7,"ref":"main>form>div:1>input","action":"type","v
 `getFrame` is read-only; `act` is gated by plan/build. `vlp_help` returns
 the full tool guide.
 
+### The `odoosh-mcp` proxy
+
+`odoosh-mcp` can reach an authenticated `odoo.sh` session through the
+read-only proxy `vlp-odoosh-proxy`, which ships with the agent kit. It is a
+per-host user service, not a per-agent CLI. See
+[Odoo.sh proxy](odoosh-proxy.md) for requirements, build, install, the user
+service, the configuration table and health checks.
+
 ## 4. Watching the agent act (action signal)
 
 Before each action that is actually going to run (`click`, `type`, `focus`,

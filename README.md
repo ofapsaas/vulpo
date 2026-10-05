@@ -39,8 +39,9 @@ agents (and remote ones too, if you expose it over VPN/LAN). See
 | `extension/` | Firefox extension (MV3): WebSocket bridge, frame driver, nav-guard, Odoo session probe. |
 | `server/` | Go server (`vlpsrv`): WS `/extension` + MCP Streamable HTTP at `/mcp`, 33 tools (21 `vlp_*` + 12 Odoo). |
 | `agent-kit/` | Agent kit: CLI `vlpmcp` (MCP stdio ↔ Streamable HTTP), skills and integrations. |
+| `agent-kit/odoosh-proxy/` | Read-only proxy `vlp-odoosh-proxy` that connects `odoosh-mcp` to an authenticated `odoo.sh` tab through Vulpo. |
 | `scripts/` | Builds: `build-server.sh`, `build-xpi.sh`, `build-agent-kit.sh`, `onboard-agent.sh`. |
-| `docs/` | Getting started, agents, security, troubleshooting. |
+| `docs/` | Getting started, agents, security, troubleshooting, `odoosh-proxy.md`. |
 
 ## Getting started
 
@@ -90,6 +91,7 @@ See `docs/getting-started.md` and `docs/agents.md`.
 ```bash
 cd server && go test ./...            # Go suite (includes the brand and docs guards)
 cd agent-kit/cli && go test ./...
+cd agent-kit/odoosh-proxy && go test ./...
 cd extension/frame && npm ci && node --test *.test.js
 cd extension/odoo && node --test *.test.js
 ```

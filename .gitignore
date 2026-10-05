@@ -4,6 +4,7 @@ logs/
 server/bin/
 # binarios que un go build local puede dejar en el árbol
 agent-kit/cli/cli
+agent-kit/odoosh-proxy/vlp-odoosh-proxy
 server/vlpsrv
 # tarballs del agent kit — generados por scripts/build-agent-kit.sh
 dist/
