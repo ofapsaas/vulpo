@@ -95,11 +95,18 @@ var VulpoRules = (() => {
     for (const line of lines) {
       const parts = line.split(/\s+/);
       if (parts.length === 2 && parts[0] === "*" && parts[1] === "None") continue;
-      if (parts.length < 3) continue;
+      if (parts.length < 3) {
+        return {
+          ok: false,
+          error: `invalid rules line "${line}": expected "bridgeUrl token domain1 domain2 ..."`
+        };
+      }
       const bridgeUrl = parts[0].replace(/\/+$/, "");
       const token = parts[1];
       const domains = parts.slice(2);
-      if (!isValidUrl(bridgeUrl)) continue;
+      if (!isValidUrl(bridgeUrl)) {
+        return { ok: false, error: `invalid bridge URL "${parts[0]}" in rules line "${line}"` };
+      }
       const id = `${bridgeUrl}|${token}`;
       const existing = byId.get(id);
       if (existing) {
@@ -143,8 +150,8 @@ var VulpoRules = (() => {
   }
   function isValidUrl(str) {
     try {
-      new URL(str);
-      return true;
+      const u = new URL(str);
+      return u.protocol === "http:" || u.protocol === "https:";
     } catch {
       return false;
     }

@@ -134,14 +134,24 @@ export function parseRules(text) {
     // Sentinel `* None` (default de loadConfig): cero perfiles, sin error (P7).
     if (parts.length === 2 && parts[0] === '*' && parts[1] === 'None') continue;
 
-    // Cada línea: bridgeUrl token dominio1 dominio2 ... (mínimo 3 partes).
-    if (parts.length < 3) continue;
+    // P15 (Enmienda 2, §2.7): toda línea que no sea un perfil válido de ≥3
+    // partes (bridgeUrl http(s) válida + token no vacío + ≥1 token de dominio)
+    // hace FALLAR VISIBLE la carga. No hay descarte silencioso de líneas
+    // malformadas (regresión de observabilidad / amplificador de seguridad).
+    if (parts.length < 3) {
+      return {
+        ok: false,
+        error: `invalid rules line "${line}": expected "bridgeUrl token domain1 domain2 ..."`,
+      };
+    }
 
     const bridgeUrl = parts[0].replace(/\/+$/, '');
     const token = parts[1];
     const domains = parts.slice(2);
 
-    if (!isValidUrl(bridgeUrl)) continue;
+    if (!isValidUrl(bridgeUrl)) {
+      return { ok: false, error: `invalid bridge URL "${parts[0]}" in rules line "${line}"` };
+    }
 
     const id = `${bridgeUrl}|${token}`;
     const existing = byId.get(id);
@@ -195,6 +205,10 @@ export function parseRules(text) {
   return { ok: true, profiles };
 }
 
+/** bridgeUrl válida = URL con protocolo http(s) (spec §2.3 P15). */
 function isValidUrl(str) {
-  try { new URL(str); return true; } catch { return false; }
+  try {
+    const u = new URL(str);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch { return false; }
 }
