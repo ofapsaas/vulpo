@@ -724,10 +724,39 @@ function reconnectAllProfiles() {
 // ============================================================
 
 /**
+ * fb-026-004 P13/P14 (D6/D7): auto-despineo del tab pin. Suelta el pin del perfil
+ * cuya pestaña fijada se cerró o dejó de resolverle. NO es una segunda autoridad
+ * de pertenencia (P17): es el release del término `profile.pin`. Se invoca en los
+ * tres caminos de baja: unregisterTab (cierre vía tabs.onRemoved + historial fuera
+ * de scope vía unregisterIfOutOfScope) y registerTab (full/redirect con cambio de
+ * perfil). El release del window pin (windows.onRemoved) NO se toca.
+ */
+function releaseTabPin(tabId) {
+  for (const profile of profiles.values()) {
+    if (profile.pin?.mode === 'tab' && profile.pin.tabId === tabId) {
+      profile.pin = null;
+      log('info', `Tab pin released for ${profile.id} (tab ${tabId})`);
+    }
+  }
+}
+
+/**
  * Register a tab with its corresponding profile.
  */
 function registerTab(tabId, url) {
   const profile = getProfileForUrl(url);
+  // fb-026-004 P14 (D6/R-6): navegación de página completa/redirect (tabs.onUpdated
+  // changeInfo.url). La pestaña fijada deja de resolver al perfil dueño del pin ⇒
+  // se suelta. Condición: la URL nueva resuelve a OTRO perfil (o a ninguno).
+  // Navegar DENTRO del scope NO lo suelta (evita el falso positivo R-6): si el
+  // dueño del pin sigue siendo el perfil resuelto, el pin se conserva.
+  const newOwnerId = profile?.id ?? null;
+  for (const p of profiles.values()) {
+    if (p.pin?.mode === 'tab' && p.pin.tabId === tabId && p.id !== newOwnerId) {
+      releaseTabPin(tabId);
+      break;
+    }
+  }
   if (!profile) {
     // Remove from any old profile
     for (const p of profiles.values()) {
@@ -755,6 +784,10 @@ function registerTab(tabId, url) {
  * Remove a tab from its profile.
  */
 function unregisterTab(tabId) {
+  // fb-026-004 P13/P14 (D6/D7): cierre de la pestaña fijada (tabs.onRemoved) o
+  // baja por historial fuera de scope (unregisterIfOutOfScope delega acá). Suelta
+  // el tab pin con condición exacta por tabId (cerrar OTRA pestaña no lo suelta).
+  releaseTabPin(tabId);
   for (const profile of profiles.values()) {
     if (profile.tabs.has(tabId)) {
       profile.tabs.delete(tabId);
