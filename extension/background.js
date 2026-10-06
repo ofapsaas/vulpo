@@ -738,6 +738,23 @@ function unregisterTab(tabId) {
 }
 
 /**
+ * fb-026-002 P5 (D4): si la pestaña salió del scope del perfil tras navegar
+ * (goBack/goForward), la desregistra — deja de aparecer en listTabs y de ser
+ * comandable. Best-effort: nunca lanza, así la respuesta del handler no cambia
+ * de shape (R-6).
+ */
+async function unregisterIfOutOfScope(tabId, profile) {
+  try {
+    const tab = await browser.tabs.get(tabId);
+    if (getProfileForUrl(tab.url)?.id !== profile.id) {
+      unregisterTab(tabId);
+    }
+  } catch {
+    // Pestaña ya inexistente o ilegible: no hay pertenencia que limpiar.
+  }
+}
+
+/**
  * Scan all existing tabs and register them.
  */
 async function refreshAllTabs() {
@@ -1606,11 +1623,14 @@ const handlers = {
     return { success: true, tabId };
   },
 
-  async goBack(params) {
+  async goBack(params, profile) {
     const { tabId } = params;
     if (!tabId) throw new Error('tabId required');
     try {
       await browser.tabs.goBack(tabId);
+      // fb-026-002 P5: si la navegación dejó la pestaña fuera de scope, se
+      // desregistra (el shape de la respuesta NO cambia — R-6).
+      await unregisterIfOutOfScope(tabId, profile);
       return { success: true, wentBack: true };
     } catch (err) {
       // No hay historial previo: no es un error, solo no se navegó.
@@ -1619,11 +1639,14 @@ const handlers = {
     }
   },
 
-  async goForward(params) {
+  async goForward(params, profile) {
     const { tabId } = params;
     if (!tabId) throw new Error('tabId required');
     try {
       await browser.tabs.goForward(tabId);
+      // fb-026-002 P5: ídem goBack — desregistra si salió de scope, sin cambiar
+      // el shape de la respuesta (R-6).
+      await unregisterIfOutOfScope(tabId, profile);
       return { success: true, wentForward: true };
     } catch (err) {
       // No hay historial siguiente: no es un error, solo no se navegó.
