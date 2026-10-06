@@ -296,3 +296,109 @@ test('P15b_bridgeurl_invalida_fail_loud', () => {
     'P15b (atomicidad R-8, todo-o-nada): ni la línea válida del mismo texto se registra',
   );
 });
+
+// ── D2 — composición de perfiles y forma del token (Enmienda 3 / P16–P18) ───
+// spec §2.8: (P16) un perfil es catch-all SOLO si `**` es su único token de
+// dominio; (P17) dos líneas con el mismo (bridgeUrl, token) ⇒ id duplicado
+// fail-loud, sin fusión silenciosa; (P18) el token de dominio debe ser un host
+// válido (host o `*.suffix` con path opcional), comparado case-insensitive.
+// Todo error ⇒ `{ok:false, error}` no vacío y CERO perfiles (atomicidad R-8).
+
+test('P16a_catch_all_mezclado_en_misma_linea_fail_loud', () => {
+  assert.ok(rules, AUSENTE);
+  // Un mismo perfil con `**` + un token con scope (misma línea) NO es un
+  // catch-all puro: el operador nunca aprobó esa amplitud ⇒ fail-loud.
+  const r = rules.parseRules(`${B} ${TOKEN_A} ** example.com/own\n`);
+  assert.equal(
+    r.ok,
+    false,
+    'P16a: `**` mezclado con un dominio con scope en la misma línea ⇒ falla visible',
+  );
+  assert.equal(typeof r.error, 'string', 'P16a: el rechazo lleva un error');
+  assert.ok(r.error.length > 0, 'P16a: el error es un string no vacío');
+  assert.equal(r.profiles, undefined, 'P16a (atomicidad R-8): cero perfiles del texto rechazado');
+});
+
+test('P16b_catch_all_por_fusion_de_lineas_fail_loud', () => {
+  assert.ok(rules, AUSENTE);
+  // Dos líneas del MISMO (bridgeUrl, token): una con scope y otra `**`. La
+  // fusión (unión) convertiría el perfil en catch-all silencioso ⇒ fail-loud.
+  const text = `${B} ${TOKEN_A} example.com/own\n${B} ${TOKEN_A} **\n`;
+  const r = rules.parseRules(text);
+  assert.equal(
+    r.ok,
+    false,
+    'P16b: `**` fusionado con un dominio con scope en el mismo id ⇒ falla visible',
+  );
+  assert.equal(typeof r.error, 'string', 'P16b: el rechazo lleva un error');
+  assert.ok(r.error.length > 0, 'P16b: el error es un string no vacío');
+  assert.equal(r.profiles, undefined, 'P16b (atomicidad R-8): cero perfiles del texto rechazado');
+});
+
+test('P16c_catch_all_exclusivo_control_positivo', () => {
+  assert.ok(rules, AUSENTE);
+  // Control positivo: `**` como ÚNICO token de dominio sigue siendo catch-all
+  // válido; el fix de P16 no debe rechazarlo.
+  const text = `${B} ${TOKEN_A} **\n${B} ${TOKEN_B} example.net/app\n`;
+  const r = rules.parseRules(text);
+  assert.equal(r.ok, true, 'P16c: `**` único token del perfil ⇒ catch-all válido');
+  assert.ok(Array.isArray(r.profiles), 'P16c: texto válido ⇒ profiles es un arreglo');
+  assert.equal(r.profiles.length, 2, 'P16c: ambos perfiles cargan');
+});
+
+test('P17_id_duplicado_fail_loud', () => {
+  assert.ok(rules, AUSENTE);
+  // Control positivo inline (patrón P15a): cada línea por separado carga, así el
+  // "no registrada" del texto combinado es discriminante (todo-o-nada).
+  const soloA = rules.parseRules(`${B} ${TOKEN_A} example.com/a\n`);
+  assert.equal(soloA.ok, true, 'P17 control: la línea del mismo id por sí sola carga');
+  // Dos líneas con el MISMO (bridgeUrl, token) ⇒ id duplicado. No hay fusión
+  // silenciosa (unión) ni last-wins silencioso ⇒ fail-loud.
+  const text = `${B} ${TOKEN_A} example.com/a\n${B} ${TOKEN_A} example.com/b\n`;
+  const r = rules.parseRules(text);
+  assert.equal(r.ok, false, 'P17: id (bridgeUrl|token) duplicado ⇒ falla visible');
+  assert.equal(typeof r.error, 'string', 'P17: el rechazo lleva un error');
+  assert.ok(r.error.length > 0, 'P17: el error es un string no vacío');
+  assert.equal(r.profiles, undefined, 'P17 (atomicidad R-8): cero perfiles del texto rechazado');
+  // Control positivo: distinto token ⇒ distinto id ⇒ carga.
+  const distintos = rules.parseRules(
+    `${B} ${TOKEN_A} example.com/a\n${B} ${TOKEN_B} example.com/b\n`,
+  );
+  assert.equal(distintos.ok, true, 'P17 control: distinto token ⇒ distinto id ⇒ carga');
+  assert.equal(distintos.profiles.length, 2, 'P17 control: dos perfiles');
+});
+
+test('P18a_token_con_esquema_fail_loud', () => {
+  assert.ok(rules, AUSENTE);
+  // Un token de dominio con `://` (una URL pegada como dominio) no es un host
+  // válido: el perfil no reclamaría ninguna URL ⇒ fail-loud, no perfil muerto.
+  const r = rules.parseRules(`${B} ${TOKEN_A} https://example.com/roadmap\n`);
+  assert.equal(r.ok, false, 'P18a: token de dominio con `://` ⇒ falla visible');
+  assert.equal(typeof r.error, 'string', 'P18a: el rechazo lleva un error');
+  assert.ok(r.error.length > 0, 'P18a: el error es un string no vacío');
+  assert.equal(r.profiles, undefined, 'P18a (atomicidad R-8): cero perfiles del texto rechazado');
+});
+
+test('P18b_token_con_asterisco_invalido_fail_loud', () => {
+  assert.ok(rules, AUSENTE);
+  // Un `*` que no es el catch-all `**` ni el comodín `*.` al inicio es un token
+  // imposible (el comodín de subdominio solo vale como `*.` al inicio).
+  const r = rules.parseRules(`${B} ${TOKEN_A} exa*mple.com\n`);
+  assert.equal(r.ok, false, 'P18b: `*` fuera de `**`/`*.` ⇒ falla visible');
+  assert.equal(typeof r.error, 'string', 'P18b: el rechazo lleva un error');
+  assert.ok(r.error.length > 0, 'P18b: el error es un string no vacío');
+  assert.equal(r.profiles, undefined, 'P18b (atomicidad R-8): cero perfiles del texto rechazado');
+});
+
+test('P18c_host_case_insensitive', () => {
+  assert.ok(rules, AUSENTE);
+  // (1) `Example.COM` es un host válido (el patrón se normaliza a lowercase).
+  const r = rules.parseRules(`${B} ${TOKEN_A} Example.COM\n`);
+  assert.equal(r.ok, true, 'P18c: host con mayúsculas es válido (se normaliza)');
+  // (2) El matcher compara case-insensitive: patrón `Example.COM` vs URL lowercase.
+  assert.equal(
+    rules.matchDomain('https://example.com/x', 'Example.COM'),
+    true,
+    'P18c: el patrón se normaliza a lowercase ⇒ matchea',
+  );
+});
