@@ -1572,10 +1572,15 @@ const handlers = {
     }
   },
 
-  async getCurrentTab(params) {
+  async getCurrentTab(params, profile) {
     const tabs = await browser.tabs.query({ active: true, currentWindow: true });
     const tab = tabs[0];
-    return tab ? { id: tab.id, title: tab.title, url: tab.url } : null;
+    if (!tab) return null;
+    // fb-026-002 P1/P2 (D1/D3): la activa de la ventana actual sólo se devuelve
+    // si pertenece al perfil del caller (predicado del seam); si no, null
+    // (fail-closed: cierra la fuga de metadatos por comandos sin tabId).
+    if (getProfileForUrl(tab.url)?.id !== profile.id) return null;
+    return { id: tab.id, title: tab.title, url: tab.url };
   },
 
   async openTab(params) {
