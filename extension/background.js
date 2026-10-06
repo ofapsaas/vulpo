@@ -1326,11 +1326,18 @@ const handlers = {
     }));
   },
 
-  async activateTab(params) {
+  async activateTab(params, profile) {
     const { tabId } = params;
     if (!tabId) throw new Error('tabId required');
     const tab = await browser.tabs.get(tabId);
-    await browser.windows.update(tab.windowId, { focused: true });
+    // fb-026-003 P9/D3 (R-7): DOS RAMAS separadas. CON window pin: se SUPRIME el
+    // enfoque de la ventana (`windows.update focused`) y se MANTIENE la
+    // activación dentro de su ventana (`tabs.update active`). SIN pin: el camino
+    // actual completo e intacto (D6). Una pestaña fuera de la ventana fijada ya
+    // fue denegada por el pre-chequeo (P4) — sin llegar a enfocar nada.
+    if (profile?.pin?.mode !== 'window') {
+      await browser.windows.update(tab.windowId, { focused: true });
+    }
     await browser.tabs.update(tabId, { active: true });
     return { success: true, tabId, title: tab.title, url: tab.url };
   },
@@ -1650,19 +1657,46 @@ const handlers = {
   },
 
   async getCurrentTab(params, profile) {
-    const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+    // fb-026-003 P6/D9: con window pin, la activa se busca en la ventana FIJADA
+    // (windowId explícito, NO `currentWindow` —que devolvería la del usuario—).
+    // Sin pin: query actual intacta (D6). Sin fallback a la activa global: si la
+    // ventana fijada ya no existe, la query devuelve vacío ⇒ null.
+    const query = profile?.pin?.mode === 'window'
+      ? { active: true, windowId: profile.pin.windowId }
+      : { active: true, currentWindow: true };
+    const tabs = await browser.tabs.query(query);
     const tab = tabs[0];
     if (!tab) return null;
-    // fb-026-002 P1/P2 (D1/D3): la activa de la ventana actual sólo se devuelve
-    // si pertenece al perfil del caller (predicado del seam); si no, null
-    // (fail-closed: cierra la fuga de metadatos por comandos sin tabId).
+    // fb-026-002 P1/P2 (D1/D3): la activa sólo se devuelve si pertenece al perfil
+    // del caller (predicado del seam); si no, null (fail-closed: cierra la fuga
+    // de metadatos por comandos sin tabId). El pin ya acotó la ventana.
     if (getProfileForUrl(tab.url)?.id !== profile.id) return null;
     return { id: tab.id, title: tab.title, url: tab.url };
   },
 
-  async openTab(params) {
+  async openTab(params, profile) {
     const { url, active } = params;
     if (!url) throw new Error('url required');
+    // fb-026-003 P8/D4 (R-3): con window pin, la pestaña se crea en la ventana
+    // FIJADA y NO activa (active:false ⇒ no altera el foco/pestaña activa del
+    // usuario). El destino sigue resolviendo al perfil (guarda de dominio de
+    // 002 P6, en guardedCommand). FAIL-CLOSED: si la ventana ancla ya no existe
+    // se deniega con un chequeo EXPLÍCITO de existencia (`windows.get`), no se
+    // confía sólo en el evento `windows.onRemoved`.
+    if (profile?.pin?.mode === 'window') {
+      const windowId = profile.pin.windowId;
+      let exists = false;
+      try {
+        exists = !!(await browser.windows.get(windowId));
+      } catch {
+        exists = false;
+      }
+      if (!exists) {
+        throw new Error(`Access denied: pinned window ${windowId} no longer exists`);
+      }
+      const tab = await browser.tabs.create({ url, windowId, active: false });
+      return { id: tab.id, title: tab.title, url: tab.url };
+    }
     const tab = await browser.tabs.create({ url, active: active ?? true });
     return { id: tab.id, title: tab.title, url: tab.url };
   },
