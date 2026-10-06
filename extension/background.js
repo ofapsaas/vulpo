@@ -220,6 +220,7 @@ const profileList = [];      // ordenado, para first-match-wins
 //   reconnectTimer: timeout|null,
 //   pingTimer: interval|null,
 //   planMode: boolean,
+//   pin: {mode, windowId, tabId}|null, // fb-026-003: pin temporal (en memoria)
 //   pendingCommands: Map,     // msgId -> { resolve, reject, timer, command }
 // }
 
@@ -285,6 +286,9 @@ function getOrCreateProfile(profileId, bridgeUrl, token) {
       reconnectTimer: null,
       pingTimer: null,
       planMode: true,
+      // fb-026-003 P3 (D1): pin en memoria, mismo ciclo de vida que planMode.
+      // Sin pin por defecto ⇒ comportamiento actual intacto (D6).
+      pin: null,
       pendingCommands: new Map(),
     });
   }
@@ -2474,6 +2478,10 @@ browser.runtime.onMessage.addListener((msg, sender) => {
           connected: profile.connected,
           tabs: profile.tabs.size,
           planMode: profile.planMode,
+          // fb-026-003 P13: el pin se agrega DESPUÉS del gate de sender (esta
+          // rama sólo es alcanzable por páginas de la extensión) — no se computa
+          // fuera y se censura al devolver.
+          pin: profile.pin,
           reconnectAttempts: profile.reconnectAttempts,
           domains: profile.domains,
         });
@@ -2536,6 +2544,33 @@ browser.runtime.onMessage.addListener((msg, sender) => {
       }
     }
     return Promise.resolve({ error: 'Profile not found' });
+  }
+
+  // fb-026-003 P1/P12 (D1/D8): setPin/clearPin viven DENTRO de la rama
+  // sender-gated (arriba) — sólo páginas de la extensión los alcanzan; un agente
+  // no puede fijarse/desfijarse a sí mismo por el canal de comandos.
+  if (msg.type === 'setPin') {
+    const profile = msg.profileId ? profiles.get(msg.profileId) : null;
+    if (!profile) return Promise.resolve({ error: 'Profile not found' });
+    // R-6: validación fail-closed del shape — sólo `mode:'window'` (003) y
+    // `windowId` numérico. Un `tabId` entrante se IGNORA (se fija tabId:null;
+    // 004 definirá el tab pin) para no sembrar contaminación.
+    if (msg.mode !== 'window' || typeof msg.windowId !== 'number' || !Number.isFinite(msg.windowId)) {
+      return Promise.resolve({ error: 'Invalid pin: mode must be "window" and windowId a number' });
+    }
+    profile.pin = { mode: 'window', windowId: msg.windowId, tabId: null };
+    log('info', `Window pin set for ${profile.id}: window ${msg.windowId}`);
+    return Promise.resolve({ success: true, profileId: profile.id, pin: profile.pin });
+  }
+
+  if (msg.type === 'clearPin') {
+    // P2: idempotente; NO crea perfil si no existe (sólo limpia si está).
+    const profile = msg.profileId ? profiles.get(msg.profileId) : null;
+    if (profile) {
+      profile.pin = null;
+      log('info', `Pin cleared for ${profile.id}`);
+    }
+    return Promise.resolve({ success: true, profileId: msg.profileId, pin: null });
   }
 
   if (msg.type === 'updateRules') {
