@@ -742,9 +742,38 @@ function unregisterTab(tabId) {
  * (goBack/goForward), la desregistra — deja de aparecer en listTabs y de ser
  * comandable. Best-effort: nunca lanza, así la respuesta del handler no cambia
  * de shape (R-6).
+ *
+ * Review Opcional 1 (2026-10-06): la resolución de la promesa de
+ * tabs.goBack()/goForward() NO garantiza que la URL ya cambió — el propio repo
+ * usa `waitForNavCommit` para `navigate` por esta misma razón. En la carrera
+ * desfavorable `tabs.get` devolvería la URL PRE-navegación y P5 no
+ * desregistraría. `waitForNavCommit` no se reusa tal cual: exige que
+ * `navigatingTabs` ya contenga el tab (si no, resuelve committed=true al
+ * instante, :843) y sembrarlo desde acá contaminaría el estado global de
+ * navegación (getFrame settle, watchdog). Equivalente mínimo: esperar
+ * acotadamente a que la URL deje de ser la previa antes de leerla.
  */
-async function unregisterIfOutOfScope(tabId, profile) {
+const NAV_COMMIT_POLL_MS = 25;
+const NAV_COMMIT_CEILING_MS = 1000;
+
+async function waitForUrlChange(tabId, previousUrl) {
+  const deadline = Date.now() + NAV_COMMIT_CEILING_MS;
+  while (Date.now() < deadline) {
+    try {
+      const tab = await browser.tabs.get(tabId);
+      if (tab.url !== previousUrl) return;
+    } catch {
+      return; // pestaña inexistente: no hay commit que esperar
+    }
+    await new Promise((resolve) => setTimeout(resolve, NAV_COMMIT_POLL_MS));
+  }
+}
+
+async function unregisterIfOutOfScope(tabId, profile, previousUrl) {
   try {
+    // P5 determinista en su propio camino: esperar el commit de la navegación
+    // de historial antes de leer la URL (el helper nunca lanza — R-6).
+    if (previousUrl !== undefined) await waitForUrlChange(tabId, previousUrl);
     const tab = await browser.tabs.get(tabId);
     if (getProfileForUrl(tab.url)?.id !== profile.id) {
       unregisterTab(tabId);
@@ -1626,11 +1655,14 @@ const handlers = {
   async goBack(params, profile) {
     const { tabId } = params;
     if (!tabId) throw new Error('tabId required');
+    // Ancla pre-navegación para la espera de commit (idioma ya usado en
+    // `navigate`, :1346): una falla de lectura no impide navegar (R-6).
+    const previousUrl = await browser.tabs.get(tabId).then((tab) => tab.url, () => undefined);
     try {
       await browser.tabs.goBack(tabId);
       // fb-026-002 P5: si la navegación dejó la pestaña fuera de scope, se
       // desregistra (el shape de la respuesta NO cambia — R-6).
-      await unregisterIfOutOfScope(tabId, profile);
+      await unregisterIfOutOfScope(tabId, profile, previousUrl);
       return { success: true, wentBack: true };
     } catch (err) {
       // No hay historial previo: no es un error, solo no se navegó.
@@ -1642,11 +1674,14 @@ const handlers = {
   async goForward(params, profile) {
     const { tabId } = params;
     if (!tabId) throw new Error('tabId required');
+    // Ancla pre-navegación para la espera de commit (idioma ya usado en
+    // `navigate`, :1346): una falla de lectura no impide navegar (R-6).
+    const previousUrl = await browser.tabs.get(tabId).then((tab) => tab.url, () => undefined);
     try {
       await browser.tabs.goForward(tabId);
       // fb-026-002 P5: ídem goBack — desregistra si salió de scope, sin cambiar
       // el shape de la respuesta (R-6).
-      await unregisterIfOutOfScope(tabId, profile);
+      await unregisterIfOutOfScope(tabId, profile, previousUrl);
       return { success: true, wentForward: true };
     } catch (err) {
       // No hay historial siguiente: no es un error, solo no se navegó.
