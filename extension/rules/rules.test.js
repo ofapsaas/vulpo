@@ -402,3 +402,33 @@ test('P18c_host_case_insensitive', () => {
     'P18c: el patrón se normaliza a lowercase ⇒ matchea',
   );
 });
+
+test('P18d_asterisco_en_path_fail_loud', () => {
+  assert.ok(rules, AUSENTE);
+  // Control discriminante: un path VÁLIDO sin `*` carga (así el fallo del texto
+  // con `*` en el path solo puede provenir de la forma del token de dominio, no
+  // de otra regla ni de un bridgeUrl inválido).
+  const control = rules.parseRules(`${B} ${TOKEN_A} example.com/project\n`);
+  assert.equal(control.ok, true, 'P18d control: un path válido sin `*` carga');
+  assert.equal(control.profiles.length, 1, 'P18d control: un solo perfil');
+
+  // Un `*` en la PORCIÓN DE PATH del token de dominio (`example.com/**` o
+  // `example.com/*`) NO es un host válido: el catch-all es el token `**` (sin
+  // host) y el comodín de subdominio solo vale como `*.` al inicio del host.
+  // Hoy se acepta como literal de path (perfil muerto) ⇒ debe fallar visible.
+  for (const dominio of ['example.com/**', 'example.com/*']) {
+    const r = rules.parseRules(`${B} ${TOKEN_A} ${dominio}\n`);
+    assert.equal(
+      r.ok,
+      false,
+      `P18d: un \`*\` en el path del token (${dominio}) ⇒ la carga debe fallar visible`,
+    );
+    assert.equal(typeof r.error, 'string', `P18d: el rechazo lleva un error (${dominio})`);
+    assert.ok(r.error.length > 0, `P18d: el error es un string no vacío (${dominio})`);
+    assert.equal(
+      r.profiles,
+      undefined,
+      `P18d (atomicidad R-8): cero perfiles del texto rechazado (${dominio})`,
+    );
+  }
+});
