@@ -92,8 +92,8 @@ const { actWithFold, navigateWithFold } = globalThis.VulpoFrameFold || {};
 // quedara stale (sin el export), la asignación de pestañas y el guard de
 // navigate/openTab usarían una noción de pertenencia rota.
 const { parseRules: parseRulesSeam, resolveProfile } = globalThis.VulpoRules || {};
-if (typeof resolveProfile !== 'function') {
-  throw new Error('VulpoRules.resolveProfile no es una función — rules-bundle.js stale o desalineado con background.js (fb-026-001)');
+if (typeof resolveProfile !== 'function' || typeof parseRulesSeam !== 'function') {
+  throw new Error('VulpoRules.resolveProfile/parseRules no son funciones — rules-bundle.js stale o desalineado con background.js (fb-026-001)');
 }
 
 // fb-020-007 §9.6: anillo de diagnóstico en memoria (≤ 200 entradas): onUpdated
@@ -336,7 +336,10 @@ async function guardedCommand(cmdName, params, profileId, command) {
 
   // — Post: filter listTabs to agent's tabs —
   if (cmdName === 'listTabs' && Array.isArray(result)) {
-    result = result.filter(t => profile.tabs.has(t.id));
+    // P13 (§2.4): re-evaluar el predicado del seam sobre la URL ACTUAL de la
+    // pestaña (no confiar solo en el Set cacheado) — robusto al drift de URL
+    // que no dispara registerTab (pushState client-side, goBack/goForward).
+    result = result.filter(t => getProfileForUrl(t.url)?.id === profile.id);
   }
 
   return result;
@@ -352,7 +355,7 @@ function parseRules(text) {
     // Fail-loud (D2/P11): no se registra NINGÚN perfil del texto rechazado
     // (atomicidad, sin aplicación parcial). El error queda en el log.
     log('error', `Invalid rules — no profiles registered: ${result.error}`);
-    return { ok: false, profileIds: [], removed: [] };
+    return { ok: false, error: result.error, profileIds: [], removed: [] };
   }
 
   const seenIds = new Set();
@@ -2460,7 +2463,12 @@ browser.runtime.onMessage.addListener((msg, sender) => {
 
   if (msg.type === 'updateRules') {
     if (msg.rules) {
-      const { removed } = parseRules(msg.rules);
+      const { ok, removed, error } = parseRules(msg.rules);
+      if (!ok) {
+        // P11: el punto de entrada de config no reporta éxito si la config es
+        // inválida (el error queda observable, no se traga).
+        return Promise.resolve({ success: false, error });
+      }
       for (const pid of removed) {
         disconnectProfile(pid);
       }
