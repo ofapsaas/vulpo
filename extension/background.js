@@ -271,11 +271,13 @@ function getProfileForUrl(url) {
 // `owned(tab.url) ∧ inPin(tab)`: el pin ACOTA, nunca amplía. Sin pin ⇒ true
 // (short-circuit: el camino actual queda intacto, D6). No es una segunda
 // autoridad de pertenencia — es un término del mismo predicado (P14).
-// 003 sólo produce `mode:'window'` (el término de tab pin es de 004).
+// fb-026-004 P4 (D1): MODE-AWARE — con `mode:'window'` compara la ventana; con
+// `mode:'tab'` compara la pestaña (ternario del contrato §2.2). Sin el ternario,
+// todo tab pin se comportaría como window pin (over-permission).
 function inPin(tab, profile) {
   const pin = profile?.pin;
   if (!pin) return true;
-  return tab.windowId === pin.windowId;
+  return pin.mode === 'window' ? tab.windowId === pin.windowId : tab.id === pin.tabId;
 }
 
 // ============================================================
@@ -1348,7 +1350,10 @@ const handlers = {
     // activación dentro de su ventana (`tabs.update active`). SIN pin: el camino
     // actual completo e intacto (D6). Una pestaña fuera de la ventana fijada ya
     // fue denegada por el pre-chequeo (P4) — sin llegar a enfocar nada.
-    if (profile?.pin?.mode !== 'window') {
+    // fb-026-004 P12 (D2): con tab pin también se SUPRIME el enfoque (cualquier
+    // pin ⇒ `!profile?.pin`), manteniendo `tabs.update({active:true})`. Si no, un
+    // tab pin robaría el foco de la ventana.
+    if (!profile?.pin) {
       await browser.windows.update(tab.windowId, { focused: true });
     }
     await browser.tabs.update(tabId, { active: true });
@@ -2620,11 +2625,37 @@ browser.runtime.onMessage.addListener((msg, sender) => {
   if (msg.type === 'setPin') {
     const profile = msg.profileId ? profiles.get(msg.profileId) : null;
     if (!profile) return Promise.resolve({ error: 'Profile not found' });
-    // R-6: validación fail-closed del shape — sólo `mode:'window'` (003) y
-    // `windowId` numérico. Un `tabId` entrante se IGNORA (se fija tabId:null;
-    // 004 definirá el tab pin) para no sembrar contaminación.
+
+    // fb-026-004 P1 (D4): tab pin. Validación FAIL-CLOSED: `tabId` número finito,
+    // pestaña existente (`tabs.get`) y su URL FRESCA resuelve a ESTE perfil.
+    // Cualquier falla ⇒ `{error}` SIN mutar `profile.pin`. `windowId` se DERIVA
+    // del `tabs.get` fresco — NUNCA del mensaje del caller (R-5). Async en esta
+    // rama (IIFE), como getStatus.
+    if (msg.mode === 'tab') {
+      return (async () => {
+        const tabId = msg.tabId;
+        if (typeof tabId !== 'number' || !Number.isFinite(tabId)) {
+          return { error: 'Invalid pin: tabId must be a finite number' };
+        }
+        let tab;
+        try {
+          tab = await browser.tabs.get(tabId);
+        } catch {
+          return { error: `Invalid pin: tab ${tabId} not found` };
+        }
+        if (getProfileForUrl(tab.url)?.id !== profile.id) {
+          return { error: `Invalid pin: tab ${tabId} does not belong to this agent` };
+        }
+        profile.pin = { mode: 'tab', windowId: tab.windowId, tabId: tab.id };
+        log('info', `Tab pin set for ${profile.id}: tab ${tab.id} (window ${tab.windowId})`);
+        return { success: true, profileId: profile.id, pin: profile.pin };
+      })();
+    }
+
+    // R-6: validación fail-closed del shape — `mode:'window'` (003) y `windowId`
+    // numérico. Un `mode` desconocido se rechaza sin tocar el pin.
     if (msg.mode !== 'window' || typeof msg.windowId !== 'number' || !Number.isFinite(msg.windowId)) {
-      return Promise.resolve({ error: 'Invalid pin: mode must be "window" and windowId a number' });
+      return Promise.resolve({ error: 'Invalid pin: mode must be "window" or "tab"' });
     }
     profile.pin = { mode: 'window', windowId: msg.windowId, tabId: null };
     log('info', `Window pin set for ${profile.id}: window ${msg.windowId}`);
