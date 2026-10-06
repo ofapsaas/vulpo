@@ -30,6 +30,7 @@ var VulpoRules = (() => {
     const slash = token.indexOf("/");
     const hostPart = slash === -1 ? token : token.slice(0, slash);
     const rawPath = slash === -1 ? null : token.slice(slash + 1);
+    if (rawPath !== null && rawPath.includes("*")) return null;
     const wildcard = hostPart.startsWith("*.");
     const hostName = wildcard ? hostPart.slice(2) : hostPart;
     if (!isValidHost(hostName)) return null;

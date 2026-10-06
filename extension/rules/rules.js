@@ -22,8 +22,8 @@
  * @param {string} token
  * @returns {{host: {t: 'e'|'w', v: string}, path: string|null, catchAll: boolean}|null}
  *   `null` si el token no es un dominio válido (`*` pelado, `://`, espacios,
- *   `*` fuera de `**`/`*.`, host vacío): `parseRules` lo rechaza (P18) y
- *   `matchDomain` devuelve false.
+ *   `*` fuera de `**`/`*.`, `*` en el path, host vacío): `parseRules` lo rechaza
+ *   (P18/P18d) y `matchDomain` devuelve false.
  */
 function parsePattern(token) {
   if (token === '**') return { catchAll: true, host: null, path: null };
@@ -32,6 +32,12 @@ function parsePattern(token) {
   const slash = token.indexOf('/');
   const hostPart = slash === -1 ? token : token.slice(0, slash);
   const rawPath = slash === -1 ? null : token.slice(slash + 1);
+
+  // P18d (review v3 #1): el `*` en la PORCIÓN DE PATH no es válido. El catch-all
+  // es el token `**` (sin host) y el comodín de subdominio solo vale como `*.`
+  // al inicio del host; un `*` de path se aceptaba como literal (perfil muerto)
+  // ⇒ fail-loud.
+  if (rawPath !== null && rawPath.includes('*')) return null;
 
   // P18 (Enmienda 3, §2.8): el host debe ser válido (`host` o `*.suffix`); el
   // `*` solo vale como comodín `*.` al inicio. El host se normaliza a lowercase
