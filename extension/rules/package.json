@@ -1,0 +1,13 @@
+{
+  "name": "vulpo-rules",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Motor de reglas host+path (fb-026-001) — ESM puro, sin globals de navegador; tests junto al código.",
+  "scripts": {
+    "test": "node --test *.test.js"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}
