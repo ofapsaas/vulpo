@@ -266,6 +266,18 @@ function getProfileForUrl(url) {
   return resolveProfile(url, list);
 }
 
+// fb-026-003 P4/P14 (D2/D6): término de predicado del pin, compuesto sobre el
+// predicado ÚNICO de pertenencia (`resolveProfile`, arriba). Se usa siempre como
+// `owned(tab.url) ∧ inPin(tab)`: el pin ACOTA, nunca amplía. Sin pin ⇒ true
+// (short-circuit: el camino actual queda intacto, D6). No es una segunda
+// autoridad de pertenencia — es un término del mismo predicado (P14).
+// 003 sólo produce `mode:'window'` (el término de tab pin es de 004).
+function inPin(tab, profile) {
+  const pin = profile?.pin;
+  if (!pin) return true;
+  return tab.windowId === pin.windowId;
+}
+
 // ============================================================
 // Profile Helpers
 // ============================================================
@@ -310,14 +322,18 @@ async function guardedCommand(cmdName, params, profileId, command) {
     // fb-026-002 P4 (D2/D4): el acceso se decide por el predicado del seam sobre
     // la URL ACTUAL de la pestaña (fresca de tabs.get), no por el Set cacheado
     // —que puede estar drift-ado—. Pestaña inexistente ⇒ denegar (fail-closed).
-    let owned = false;
+    // fb-026-003 P4/P11 (D2/D6): el predicado se compone con el pin como
+    // `owned(URL fresca) ∧ inPin(tab)` — conjunción, SIN OR ni fallback. Una
+    // pestaña fuera de la ventana fijada se deniega aunque su URL resuelva al
+    // perfil; el pin sólo puede reducir el conjunto. Sin pin, inPin ⇒ true.
+    let allowed = false;
     try {
       const tab = await browser.tabs.get(tabIdNum);
-      owned = getProfileForUrl(tab.url)?.id === profile.id;
+      allowed = getProfileForUrl(tab.url)?.id === profile.id && inPin(tab, profile);
     } catch {
-      owned = false;
+      allowed = false;
     }
-    if (!owned) {
+    if (!allowed) {
       throw new Error(`Access denied: tab ${params.tabId} is not assigned to this agent`);
     }
     params.tabId = tabIdNum;
@@ -352,7 +368,9 @@ async function guardedCommand(cmdName, params, profileId, command) {
     // P13 (§2.4): re-evaluar el predicado del seam sobre la URL ACTUAL de la
     // pestaña (no confiar solo en el Set cacheado) — robusto al drift de URL
     // que no dispara registerTab (pushState client-side, goBack/goForward).
-    result = result.filter(t => getProfileForUrl(t.url)?.id === profile.id);
+    // fb-026-003 P5 (D2): el filtro de ventana se SUMA (AND) al de URL —
+    // excluye la propia de otra ventana y la ajena de la ventana fijada.
+    result = result.filter(t => getProfileForUrl(t.url)?.id === profile.id && inPin(t, profile));
   }
 
   return result;
@@ -2141,11 +2159,14 @@ const handlers = {
     // perfil del caller (predicado del seam), no la mera pertenencia al Set
     // cacheado — excluye la propia drift-ada fuera de scope y la ajena. Sin OR
     // con el Set.
-    const candidates = await Promise.all([...profile.tabs].map(async (tabId) => ({
-      tabId,
-      url: await browser.tabs.get(tabId).then((tab) => tab.url, () => undefined),
-    })));
-    const tabs = candidates.filter((t) => getProfileForUrl(t.url)?.id === profile.id);
+    // fb-026-003 P7 (D2): el filtro de ventana se SUMA (AND) al de URL — se
+    // sondea sólo la ventana fijada (la lectura captura windowId además de url).
+    const candidates = await Promise.all([...profile.tabs].map(async (tabId) => {
+      const tab = await browser.tabs.get(tabId).then((t) => t, () => undefined);
+      return { tabId, url: tab?.url, windowId: tab?.windowId };
+    }));
+    const tabs = candidates.filter((t) =>
+      getProfileForUrl(t.url)?.id === profile.id && inPin(t, profile));
     // fb-020-007 §9.2: cada sonda late desde su página con el id de este comando.
     const tracked = [];
     const probe = async (tabId) => {
