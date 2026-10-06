@@ -301,10 +301,19 @@ async function guardedCommand(cmdName, params, profileId, command) {
   // — Pre: tab access control —
   if (params.tabId != null) {
     // Normalizar: el server manda tabId como string ("9"), pero el Set guarda
-    // números de Firefox (9). Aceptar ambos y pasar número a los handlers.
+    // números de Firefox (9). Pasar número a los handlers.
     const tabIdNum = Number(params.tabId);
-    const hasTab = profile.tabs.has(params.tabId) || profile.tabs.has(tabIdNum);
-    if (!hasTab) {
+    // fb-026-002 P4 (D2/D4): el acceso se decide por el predicado del seam sobre
+    // la URL ACTUAL de la pestaña (fresca de tabs.get), no por el Set cacheado
+    // —que puede estar drift-ado—. Pestaña inexistente ⇒ denegar (fail-closed).
+    let owned = false;
+    try {
+      const tab = await browser.tabs.get(tabIdNum);
+      owned = getProfileForUrl(tab.url)?.id === profile.id;
+    } catch {
+      owned = false;
+    }
+    if (!owned) {
       throw new Error(`Access denied: tab ${params.tabId} is not assigned to this agent`);
     }
     params.tabId = tabIdNum;
