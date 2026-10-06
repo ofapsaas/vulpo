@@ -316,6 +316,15 @@ async function guardedCommand(cmdName, params, profileId, command) {
   const profile = profiles.get(profileId);
   if (!profile) throw new Error(`Profile "${profileId}" not found`);
 
+  // fb-026-004 P9/P10 (D3/R-4): con tab pin, el agente fijado a una pestaña NO
+  // abre ni cierra pestañas. Denegación fail-closed en el punto único, POR ENCIMA
+  // del pre-chequeo de acceso: `openTab` no lleva tabId (no lo alcanzaría) y
+  // `closeTab` sí (sobre la pestaña fijada pasaría owned∧inPin). Va también antes
+  // de la rama window-pin de openTab (que si no caería al tabs.create genérico).
+  if (profile.pin?.mode === 'tab' && (cmdName === 'openTab' || cmdName === 'closeTab')) {
+    throw new Error(`Access denied: ${cmdName} is not allowed while pinned to a tab`);
+  }
+
   // — Pre: tab access control —
   if (params.tabId != null) {
     // Normalizar: el server manda tabId como string ("9"), pero el Set guarda
