@@ -2098,10 +2098,15 @@ const handlers = {
   // fb-020-007 §2.1/§2.2 (P14): sondas en paralelo, cada una con espera previa
   // y watchdog; toda falla (tab cerrado, huérfana, espera vencida) → clase (a).
   async odooDetectTabs(params, profile, command) {
-    const tabs = await Promise.all([...profile.tabs].map(async (tabId) => ({
+    // fb-026-002 P7 (D3): sondear SOLO las pestañas cuya URL ACTUAL resuelve al
+    // perfil del caller (predicado del seam), no la mera pertenencia al Set
+    // cacheado — excluye la propia drift-ada fuera de scope y la ajena. Sin OR
+    // con el Set.
+    const candidates = await Promise.all([...profile.tabs].map(async (tabId) => ({
       tabId,
       url: await browser.tabs.get(tabId).then((tab) => tab.url, () => undefined),
     })));
+    const tabs = candidates.filter((t) => getProfileForUrl(t.url)?.id === profile.id);
     // fb-020-007 §9.2: cada sonda late desde su página con el id de este comando.
     const tracked = [];
     const probe = async (tabId) => {
