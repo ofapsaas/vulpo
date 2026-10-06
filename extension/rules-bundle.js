@@ -30,9 +30,17 @@ var VulpoRules = (() => {
     const slash = token.indexOf("/");
     const hostPart = slash === -1 ? token : token.slice(0, slash);
     const rawPath = slash === -1 ? null : token.slice(slash + 1);
-    const host = hostPart.startsWith("*.") ? { t: "w", v: hostPart.slice(2) } : { t: "e", v: hostPart };
+    const wildcard = hostPart.startsWith("*.");
+    const hostName = wildcard ? hostPart.slice(2) : hostPart;
+    if (!isValidHost(hostName)) return null;
+    const host = { t: wildcard ? "w" : "e", v: hostName.toLowerCase() };
     const path = rawPath === null ? null : rawPath.replace(/^\/+|\/+$/g, "") || null;
     return { catchAll: false, host, path };
+  }
+  function isValidHost(host) {
+    return /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$/.test(
+      host
+    );
   }
   function hostMatches(hostname, host) {
     if (host.t === "w") return hostname === host.v || hostname.endsWith("." + host.v);
@@ -107,6 +115,17 @@ var VulpoRules = (() => {
       if (!isValidUrl(bridgeUrl)) {
         return { ok: false, error: `invalid bridge URL "${parts[0]}" in rules line "${line}"` };
       }
+      for (const domain of domains) {
+        if (domain === "*") {
+          return {
+            ok: false,
+            error: `invalid domain "*" (line "${line}") \u2014 use "**" for an explicit catch-all`
+          };
+        }
+        if (parsePattern(domain) === null) {
+          return { ok: false, error: `invalid domain "${domain}" (line "${line}") \u2014 not a valid host` };
+        }
+      }
       if (domains.includes("**") && domains.length > 1) {
         return { ok: false, error: `"**" must be the only domain of profile "${bridgeUrl}|${token}"` };
       }
@@ -117,16 +136,6 @@ var VulpoRules = (() => {
       const profile = { id, bridgeUrl, token, domains: [...domains] };
       byId.set(id, profile);
       profiles.push(profile);
-    }
-    for (const profile of profiles) {
-      for (const domain of profile.domains) {
-        if (domain === "*") {
-          return {
-            ok: false,
-            error: `invalid domain "*" (profile "${profile.id}") \u2014 use "**" for an explicit catch-all`
-          };
-        }
-      }
     }
     const catchAlls = profiles.filter((p) => p.domains.includes("**"));
     if (catchAlls.length > 1) {

@@ -21,7 +21,9 @@
  * Descompone un token de dominio en host + prefijo de path.
  * @param {string} token
  * @returns {{host: {t: 'e'|'w', v: string}, path: string|null, catchAll: boolean}|null}
- *   `null` si el token es un `*` pelado (inválido: `parseRules` lo rechaza).
+ *   `null` si el token no es un dominio válido (`*` pelado, `://`, espacios,
+ *   `*` fuera de `**`/`*.`, host vacío): `parseRules` lo rechaza (P18) y
+ *   `matchDomain` devuelve false.
  */
 function parsePattern(token) {
   if (token === '**') return { catchAll: true, host: null, path: null };
@@ -31,13 +33,26 @@ function parsePattern(token) {
   const hostPart = slash === -1 ? token : token.slice(0, slash);
   const rawPath = slash === -1 ? null : token.slice(slash + 1);
 
-  const host = hostPart.startsWith('*.')
-    ? { t: 'w', v: hostPart.slice(2) }
-    : { t: 'e', v: hostPart };
+  // P18 (Enmienda 3, §2.8): el host debe ser válido (`host` o `*.suffix`); el
+  // `*` solo vale como comodín `*.` al inicio. El host se normaliza a lowercase
+  // para comparar case-insensitive (P18c).
+  const wildcard = hostPart.startsWith('*.');
+  const hostName = wildcard ? hostPart.slice(2) : hostPart;
+  if (!isValidHost(hostName)) return null;
+
+  const host = { t: wildcard ? 'w' : 'e', v: hostName.toLowerCase() };
 
   const path = rawPath === null ? null : rawPath.replace(/^\/+|\/+$/g, '') || null;
 
   return { catchAll: false, host, path };
+}
+
+/** Host válido (P18): etiquetas alfanuméricas separadas por puntos, con guiones
+ *  internos; sin esquema, sin espacios, sin `*`. */
+function isValidHost(host) {
+  return /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$/.test(
+    host,
+  );
 }
 
 function hostMatches(hostname, host) {
@@ -153,6 +168,22 @@ export function parseRules(text) {
       return { ok: false, error: `invalid bridge URL "${parts[0]}" in rules line "${line}"` };
     }
 
+    // P18 (Enmienda 3, §2.8): cada token de dominio debe ser un host válido
+    // (`host` o `*.suffix`, con path opcional). Un token imposible (`*` pelado,
+    // `://`, espacios, `*` fuera de `**`/`*.`) hace fallar visible la carga:
+    // cierra el "perfil muerto silencioso".
+    for (const domain of domains) {
+      if (domain === '*') {
+        return {
+          ok: false,
+          error: `invalid domain "*" (line "${line}") — use "**" for an explicit catch-all`,
+        };
+      }
+      if (parsePattern(domain) === null) {
+        return { ok: false, error: `invalid domain "${domain}" (line "${line}") — not a valid host` };
+      }
+    }
+
     // P16 (Enmienda 3, §2.8): `**` es catch-all SOLO si es el ÚNICO token de
     // dominio del perfil. Mezclarlo con dominios con scope sería un catch-all
     // silencioso (amplitud nunca aprobada por el operador) ⇒ fail-loud.
@@ -169,18 +200,6 @@ export function parseRules(text) {
     const profile = { id, bridgeUrl, token, domains: [...domains] };
     byId.set(id, profile);
     profiles.push(profile);
-  }
-
-  // P6 — `*` pelado inválido (fail-loud).
-  for (const profile of profiles) {
-    for (const domain of profile.domains) {
-      if (domain === '*') {
-        return {
-          ok: false,
-          error: `invalid domain "*" (profile "${profile.id}") — use "**" for an explicit catch-all`,
-        };
-      }
-    }
   }
 
   // P8 — a lo sumo un perfil `**` (catch-all con opt-in explícito).
