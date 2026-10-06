@@ -153,15 +153,22 @@ export function parseRules(text) {
       return { ok: false, error: `invalid bridge URL "${parts[0]}" in rules line "${line}"` };
     }
 
-    const id = `${bridgeUrl}|${token}`;
-    const existing = byId.get(id);
-    if (existing) {
-      existing.domains.push(...domains);
-    } else {
-      const profile = { id, bridgeUrl, token, domains: [...domains] };
-      byId.set(id, profile);
-      profiles.push(profile);
+    // P16 (Enmienda 3, §2.8): `**` es catch-all SOLO si es el ÚNICO token de
+    // dominio del perfil. Mezclarlo con dominios con scope sería un catch-all
+    // silencioso (amplitud nunca aprobada por el operador) ⇒ fail-loud.
+    if (domains.includes('**') && domains.length > 1) {
+      return { ok: false, error: `"**" must be the only domain of profile "${bridgeUrl}|${token}"` };
     }
+
+    const id = `${bridgeUrl}|${token}`;
+    // P17 (Enmienda 3, §2.8): id duplicado ⇒ fail-loud. No hay fusión (unión)
+    // ni last-wins silencioso; el id `(bridgeUrl, token)` debe ser único.
+    if (byId.has(id)) {
+      return { ok: false, error: `duplicate profile id "${id}"` };
+    }
+    const profile = { id, bridgeUrl, token, domains: [...domains] };
+    byId.set(id, profile);
+    profiles.push(profile);
   }
 
   // P6 — `*` pelado inválido (fail-loud).

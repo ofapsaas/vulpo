@@ -107,15 +107,16 @@ var VulpoRules = (() => {
       if (!isValidUrl(bridgeUrl)) {
         return { ok: false, error: `invalid bridge URL "${parts[0]}" in rules line "${line}"` };
       }
-      const id = `${bridgeUrl}|${token}`;
-      const existing = byId.get(id);
-      if (existing) {
-        existing.domains.push(...domains);
-      } else {
-        const profile = { id, bridgeUrl, token, domains: [...domains] };
-        byId.set(id, profile);
-        profiles.push(profile);
+      if (domains.includes("**") && domains.length > 1) {
+        return { ok: false, error: `"**" must be the only domain of profile "${bridgeUrl}|${token}"` };
       }
+      const id = `${bridgeUrl}|${token}`;
+      if (byId.has(id)) {
+        return { ok: false, error: `duplicate profile id "${id}"` };
+      }
+      const profile = { id, bridgeUrl, token, domains: [...domains] };
+      byId.set(id, profile);
+      profiles.push(profile);
     }
     for (const profile of profiles) {
       for (const domain of profile.domains) {
