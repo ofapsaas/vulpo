@@ -45,59 +45,25 @@ function showStatus(msg, type) {
   setTimeout(() => { statusMsg.className = 'status'; }, 5000);
 }
 
-// Validate URL
-function isValidUrl(str) {
-  try { new URL(str); return true; } catch { return false; }
-}
-
-function validateLine(line) {
-  const trimmed = line.trim();
-  if (!trimmed || trimmed.startsWith('#')) return true;
-
-  const parts = trimmed.split(/\s+/);
-
-  // "* None" is always valid (backward compat)
-  if (parts[0] === '*' && parts[1] === 'None') return true;
-
-  // New format: bridgeUrl token dominio1 dominio2 ...
-  // Requires at least 3 parts: url, token, and one domain
-  if (parts.length < 3) return false;
-
-  // First element must be a valid URL (bridgeUrl)
-  if (!isValidUrl(parts[0])) return false;
-
-  // Second element is the token (must be non-empty)
-  if (!parts[1]) return false;
-
-  return true;
+// Validación — consume el MISMO seam que el background (VulpoRules.parseRules,
+// fb-026-001 §2.6): una sola noción de "config válida". Fail-loud si el bundle
+// no está cargado (options.html lo carga antes que este script).
+function validateText(text) {
+  const rules = globalThis.VulpoRules;
+  if (!rules || typeof rules.parseRules !== 'function') {
+    return { ok: false, error: 'motor de reglas no disponible (rules-bundle.js)' };
+  }
+  return rules.parseRules(text);
 }
 
 // Save rules
 async function saveRules() {
   const text = rulesInput.value.trim() || DEFAULT_RULES;
 
-  const lines = text.split('\n').filter(l => l.trim());
-  const errors = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (!validateLine(lines[i])) {
-      const trimmed = lines[i].trim();
-      const parts = trimmed.split(/\s+/);
-      let msg;
-      if (parts.length < 3) {
-        msg = 'se requieren al menos 3 elementos: bridgeUrl token dominio1 ...';
-      } else if (!isValidUrl(parts[0])) {
-        msg = `URL inválida "${parts[0]}"`;
-      } else if (!parts[1]) {
-        msg = 'token vacío';
-      } else {
-        msg = 'formato inválido';
-      }
-      errors.push(`Línea ${i + 1}: ${msg}`);
-    }
-  }
-
-  if (errors.length > 0) {
-    showStatus(`⚠️ ${errors.join('; ')}`, 'error');
+  // Fail-loud: no se guarda una config inválida (solapamiento, `*` pelado, dos `**`).
+  const result = validateText(text);
+  if (!result.ok) {
+    showStatus(`⚠️ ${result.error}`, 'error');
     return;
   }
 
@@ -141,12 +107,7 @@ rulesInput.addEventListener('keydown', (e) => {
 
 // Live validation
 rulesInput.addEventListener('input', () => {
-  const lines = rulesInput.value.split('\n').filter(l => l.trim());
-  let allValid = true;
-  for (const line of lines) {
-    if (!validateLine(line)) { allValid = false; break; }
-  }
-  rulesInput.style.borderColor = allValid ? '' : 'var(--danger)';
+  rulesInput.style.borderColor = validateText(rulesInput.value).ok ? '' : 'var(--danger)';
 });
 
 saveBtn.addEventListener('click', saveRules);

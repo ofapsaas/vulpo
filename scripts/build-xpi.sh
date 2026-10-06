@@ -98,6 +98,11 @@ bash "$EXTENSION_DIR/frame/build-frame.sh"
 # VulpoSessionProbe. Fail-loud igual que el frame.
 bash "$EXTENSION_DIR/odoo/build-probe.sh"
 
+# Regenerar el bundle del motor de reglas host+path (fb-026-001): parseRules /
+# matchDomain / resolveProfile, IIFE con el global VulpoRules. Fail-loud igual
+# que el frame.
+bash "$EXTENSION_DIR/rules/build-rules.sh"
+
 # Create XPI (ZIP with .xpi extension)
 cd "$EXTENSION_DIR"
 zip -r "$OUTPUT" . \

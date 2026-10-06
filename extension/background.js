@@ -87,6 +87,15 @@ if (typeof isExtensionPageSender !== 'function') {
 // fb-020-008 (act frame fold): módulo del pliegue de lectura en las acciones.
 const { actWithFold, navigateWithFold } = globalThis.VulpoFrameFold || {};
 
+// fb-026-001 (D3): motor de reglas host+path — bundle IIFE con global VulpoRules
+// cargado antes de background.js. Fail-loud al CARGAR: si el bundle shipped
+// quedara stale (sin el export), la asignación de pestañas y el guard de
+// navigate/openTab usarían una noción de pertenencia rota.
+const { parseRules: parseRulesSeam, resolveProfile } = globalThis.VulpoRules || {};
+if (typeof resolveProfile !== 'function') {
+  throw new Error('VulpoRules.resolveProfile no es una función — rules-bundle.js stale o desalineado con background.js (fb-026-001)');
+}
+
 // fb-020-007 §9.6: anillo de diagnóstico en memoria (≤ 200 entradas): onUpdated
 // por pestaña, despachos, desenlaces y latidos de página. Cómo leerlo: cada
 // entrada sale también por la consola del event page con el prefijo
@@ -249,43 +258,11 @@ function log(level, msg, data = null) {
 }
 
 // ============================================================
-// Domain Matching
+// Domain Matching — delegado al seam VulpoRules (fb-026-001, D1/D3)
 // ============================================================
-function matchDomain(hostname, pattern) {
-  if (pattern === '*') return true;
-  if (pattern.startsWith('*.')) {
-    const suffix = pattern.slice(1); // .domain.com
-    return hostname.endsWith(suffix) || hostname === pattern.slice(2);
-  }
-  return hostname === pattern;
-}
-
 function getProfileForUrl(url) {
-  try {
-    const u = new URL(url);
-    if (!u.protocol.startsWith('http')) return null;
-    const hostname = u.hostname;
-
-    for (const pid of profileList) {
-      const profile = profiles.get(pid);
-      if (!profile) continue;
-      for (const domain of profile.domains) {
-        if (matchDomain(hostname, domain)) {
-          return profile;
-        }
-      }
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-// ============================================================
-// Config Parser
-// ============================================================
-function isValidUrl(str) {
-  try { new URL(str); return true; } catch { return false; }
+  const list = profileList.map((pid) => profiles.get(pid)).filter(Boolean);
+  return resolveProfile(url, list);
 }
 
 // ============================================================
@@ -366,39 +343,27 @@ async function guardedCommand(cmdName, params, profileId, command) {
 }
 
 // ============================================================
-// Config Parser — new format:
-//   bridgeUrl token domain1 domain2 ...
+// Config Parser — delega en el seam VulpoRules (fb-026-001, D1/D2).
+//   Formato: bridgeUrl token domain1 domain2 ...
 // ============================================================
 function parseRules(text) {
-  const lines = text.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+  const result = parseRulesSeam(text);
+  if (!result.ok) {
+    // Fail-loud (D2/P11): no se registra NINGÚN perfil del texto rechazado
+    // (atomicidad, sin aplicación parcial). El error queda en el log.
+    log('error', `Invalid rules — no profiles registered: ${result.error}`);
+    return { ok: false, profileIds: [], removed: [] };
+  }
+
   const seenIds = new Set();
-
-  for (let i = 0; i < lines.length; i++) {
-    const parts = lines[i].split(/\s+/);
-    // Each line: bridgeUrl token domain1 domain2 ...
-    if (parts.length < 3) {
-      log('warn', `Skipping line ${i + 1}: expected bridgeUrl token domain...`, lines[i]);
-      continue;
-    }
-
-    const bridgeUrl = parts[0].replace(/\/+$/, '');
-    const token = parts[1];
-    const domains = parts.slice(2);
-
-    if (!isValidUrl(bridgeUrl)) {
-      log('warn', `Skipping line ${i + 1}: invalid bridgeUrl`, bridgeUrl);
-      continue;
-    }
-
-    const profileId = `${bridgeUrl}|${token}`;
-    seenIds.add(profileId);
-
-    const profile = getOrCreateProfile(profileId, bridgeUrl, token);
-    profile.domains = domains;
+  for (const p of result.profiles) {
+    seenIds.add(p.id);
+    const profile = getOrCreateProfile(p.id, p.bridgeUrl, p.token);
+    profile.domains = p.domains;
 
     // Add to profileList if not already there (preserve order)
-    if (!profileList.includes(profileId)) {
-      profileList.push(profileId);
+    if (!profileList.includes(p.id)) {
+      profileList.push(p.id);
     }
   }
 
@@ -417,7 +382,7 @@ function parseRules(text) {
   }
 
   log('info', `Rules parsed: ${seenIds.size} profiles, ${removed.length} removed`);
-  return { profileIds: [...seenIds], removed };
+  return { ok: true, profileIds: [...seenIds], removed };
 }
 
 // ============================================================
@@ -433,8 +398,10 @@ async function loadConfig() {
       data = await browser.storage.local.get(CONFIG.storageKey);
     }
     const text = data[CONFIG.storageKey] || '* None\n';
-    parseRules(text);
-    log('info', 'Config loaded', { profiles: profileList.length });
+    const { ok } = parseRules(text);
+    if (ok) {
+      log('info', 'Config loaded', { profiles: profileList.length });
+    }
   } catch (err) {
     log('error', 'Failed to load config', err.message);
   }

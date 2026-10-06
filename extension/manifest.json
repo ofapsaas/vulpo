@@ -32,7 +32,7 @@
   },
 
   "background": {
-    "scripts": ["session-probe-bundle.js", "nav-guard-bundle.js", "odoo-nav-guard-bundle.js", "frame-fold-bundle.js", "native-dialog-main.js", "background.js"]
+    "scripts": ["session-probe-bundle.js", "nav-guard-bundle.js", "odoo-nav-guard-bundle.js", "frame-fold-bundle.js", "native-dialog-main.js", "rules-bundle.js", "background.js"]
   },
 
   "options_ui": {
