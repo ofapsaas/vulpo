@@ -833,6 +833,19 @@ browser.tabs.onRemoved.addListener((tabId) => {
   emitNavEvent('removed', tabId);
 });
 
+// fb-026-003 P10 (D5): auto-despineo por cierre de la VENTANA ancla. Listener
+// NUEVO de browser.windows (no existe hoy; el manifest ya tiene `tabs`, sin
+// permiso nuevo). NO se hookea en tabs.onRemoved: cerrar una PESTAÑA no suelta
+// un window pin. Sólo suelta el perfil cuyo windowId coincide.
+browser.windows.onRemoved.addListener((windowId) => {
+  for (const profile of profiles.values()) {
+    if (profile.pin?.mode === 'window' && profile.pin.windowId === windowId) {
+      profile.pin = null;
+      log('info', `Window pin released for ${profile.id} (window ${windowId} closed)`);
+    }
+  }
+});
+
 browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   // fb-018-006 §2.2.7 (enmienda P14): ciclo de vida de la navegación de
   // página completa — status loading añade, complete remueve. Único dueño del
