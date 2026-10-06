@@ -13,9 +13,16 @@
  *
  * ── Naturaleza RED esperada ─────────────────────────────────────────────────
  *  `options.html` PREEXISTE: su ausencia es infraestructura (throw), nunca RED.
- *  El RED es de CONTENIDO: hoy el doc promueve `*` como catch-all
- *  (`Se puede usar "*" como dominio catch-all:` + `YOUR_TOKEN *`), no menciona
- *  `**` ni la forma `host/prefijo` ni la invalidez de `*` ⇒ AssertionError.
+ *  El RED es de CONTENIDO: la mitad positiva exige host/prefijo, `**` y la
+ *  invalidez del `*` pelado ⇒ AssertionError si el doc no se actualizó.
+ *
+ * ── Refuerzo del oráculo negativo (hallazgo #8, ronda de fixes) ─────────────
+ *  La mitad negativa ya NO es el string único `doc.includes('YOUR_TOKEN *')`.
+ *  Ahora asierta la PROPIEDAD GENERAL: ninguna línea de ejemplo promueve un `*`
+ *  pelado como token de dominio (fuera de `**`/`*.sufijo`), y la doc SÍ ata el
+ *  `*` pelado al fail-loud. Se auto-verifica la discriminancia del oráculo con
+ *  cadenas sintéticas (detecta `YOUR_BRIDGE YOUR_TOKEN *`, no confunde `**` ni
+ *  `*.sufijo`).
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -58,10 +65,78 @@ test('P14_doc_formato_options_actualizada', () => {
     'P14(c): options.html debe declarar que un * pelado es inválido (fail-loud)',
   );
 
-  // Ya NO presenta * como catch-all válido (el ejemplo viejo promovía `YOUR_TOKEN *`).
-  assert.equal(
-    doc.includes('YOUR_TOKEN *'),
-    false,
-    'P14: el ejemplo con * pelado como dominio catch-all debe desaparecer',
+  // ── Oráculo negativo REFORZADO (hallazgo #8 de la review) ────────────────
+  // Propiedad GENERAL, no un string único: la doc NO debe promover un `*`
+  // pelado como token de dominio válido, y SÍ debe atar el `*` pelado al
+  // fail-loud. Un `*` pelado es un `*` que NO forma parte de `**` (catch-all)
+  // ni de `*.sufijo` (comodín de subdominio); puede venir citado (`"*"`,
+  // `<code>*</code>`, `(*)`), como en el estilo de la doc vieja (`"*"`).
+  const STAR_PELADO = /(?<!\*)(?:^|[^\w*])\*(?![\*.\w])/; // no matchea `**` ni `*.x`
+  const FAILLOUD = /inv[aá]lid|rechazad|no se permite|no es v[aá]lid|fail[- ]?loud|falla/i;
+  // Texto plano: las etiquetas HTML no deben ocultar un `*` pelado del oráculo.
+  const plano = doc.replace(/<[^>]*>/g, ' ');
+
+  // (i) Discriminancia del propio oráculo (auto-test de la propiedad).
+  assert.ok(
+    STAR_PELADO.test('YOUR_BRIDGE YOUR_TOKEN *'),
+    'P14: el oráculo debe detectar un `*` pelado como dominio (discriminante, no string único)',
+  );
+  assert.ok(
+    STAR_PELADO.test('un "*" pelado no es válido'),
+    'P14: el oráculo debe detectar un `*` pelado citado ("*")',
+  );
+  assert.ok(
+    !STAR_PELADO.test('YOUR_BRIDGE YOUR_TOKEN **'),
+    'P14: el oráculo NO debe confundir el catch-all `**` con un `*` pelado',
+  );
+  assert.ok(
+    !STAR_PELADO.test('YOUR_BRIDGE YOUR_TOKEN *.example.com'),
+    'P14: el oráculo NO debe confundir el comodín `*.sufijo` con un `*` pelado',
+  );
+
+  // (ii) Propiedad negativa: ninguna línea de ejemplo promueve un `*` pelado
+  //      como token de dominio. Se identifican las líneas con forma de regla
+  //      (contienen un campo bridge/token: placeholder en mayúsculas o URL
+  //      http(s)) y cuyo último campo (el dominio) es exactamente `*`, salvo
+  //      que la línea lo presente explícitamente como inválido (fail-loud).
+  const esLineaRegla = (l) => {
+    const toks = l.split(/\s+/).filter(Boolean);
+    if (toks.length < 2) return false;
+    return toks.some((t) => /^https?:\/\//i.test(t) || /^[A-Z][A-Z0-9_]*$/.test(t));
+  };
+  const promueveStarPelado = (l) => {
+    const toks = l.split(/\s+/).filter(Boolean);
+    if (toks.length === 0 || toks[toks.length - 1] !== '*') return false;
+    if (FAILLOUD.test(l)) return false; // la línea lo declara inválido: correcto
+    return esLineaRegla(l);
+  };
+  const lineasPromuevenStar = plano
+    .split('\n')
+    .map((l, i) => ({ n: i + 1, l: l.trim() }))
+    .filter(({ l }) => promueveStarPelado(l))
+    .map(({ n, l }) => `L${n}: ${l}`);
+  assert.deepEqual(
+    lineasPromuevenStar,
+    [],
+    'P14: la doc NO debe promover un `*` pelado como dominio válido en ninguna línea de ejemplo',
+  );
+
+  // (iii) La doc SÍ debe atar el `*` pelado al fail-loud (no basta un lenguaje
+  //       genérico de invalidez): un `*` pelado debe aparecer en las cercanías
+  //       de lenguaje de fail-loud.
+  let mencionaFailLoudStar = false;
+  const reStar = new RegExp(STAR_PELADO.source, 'g');
+  let m;
+  while ((m = reStar.exec(plano)) !== null) {
+    const desde = Math.max(0, m.index - 200);
+    const hasta = Math.min(plano.length, m.index + 200);
+    if (FAILLOUD.test(plano.slice(desde, hasta))) {
+      mencionaFailLoudStar = true;
+      break;
+    }
+  }
+  assert.ok(
+    mencionaFailLoudStar,
+    'P14: la doc debe mencionar el fail-loud del `*` pelado (no solo un `*` como catch-all)',
   );
 });

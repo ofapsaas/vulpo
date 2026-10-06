@@ -1,7 +1,8 @@
 /**
  * rules.test.js — fb-026-001-host-path-isolation (RED, seam puro).
  *
- * Verifica P1–P13 de docs/specs/fb-026-001-host-path-isolation/spec.md §2.1/§2.2/§2.3
+ * Verifica P1–P13 y P15 (Enmienda 2, §2.7) de
+ * docs/specs/fb-026-001-host-path-isolation/spec.md §2.1/§2.2/§2.3/§2.7
  * y el mapeo test↔postcondición del test-audit.md aprobado (§3).
  *
  * Escrito SOLO contra el contrato del spec (firma del seam §2.1 + semántica §2.2 +
@@ -235,4 +236,63 @@ test('P13_listtabs_excluye_fuera_de_scope', () => {
   assert.equal(rules.matchDomain(dentro, profA.domains[0]), true, 'P13: en scope ⇒ pertenece');
   assert.equal(rules.matchDomain(fuera, profA.domains[0]), false, 'P13: fuera de scope ⇒ NO pertenece');
   assert.equal(rules.resolveProfile(fuera, [profA]), null, 'P13: fuera de scope ⇒ no listada');
+});
+
+// ── D2 — fail-loud de líneas malformadas (Enmienda 2 / P15, spec §2.7) ───────
+// Una línea que NO es comentario (#), NO es vacía/whitespace, NO es el sentinel
+// `* None`, y NO es un perfil válido de ≥3 partes (bridgeUrl http(s) válida,
+// token no vacío, ≥1 token de dominio) hace FALLAR VISIBLE la carga:
+// `{ok:false, error}` y CERO perfiles del texto (atomicidad, P9). No hay
+// descarte silencioso de líneas malformadas.
+
+test('P15a_linea_corta_no_sentinel_fail_loud', () => {
+  assert.ok(rules, AUSENTE);
+  const VALIDA = `${B} ${TOKEN_A} example.com/project\n`;
+  // (control) la línea válida por sí sola carga: así el "no registrada" del
+  // texto combinado es discriminante (todo-o-nada), no un falso positivo.
+  const control = rules.parseRules(VALIDA);
+  assert.equal(control.ok, true, 'P15a control: la línea válida por sí sola carga');
+  assert.equal(control.profiles.length, 1, 'P15a control: un solo perfil');
+
+  // Línea de 2 partes que NO es el sentinel `* None` (aquí `https://b T`):
+  // no es comentario, no es vacía, no es sentinel ni un perfil de ≥3 partes.
+  const r = rules.parseRules(`https://b T\n${VALIDA}`);
+  assert.equal(
+    r.ok,
+    false,
+    'P15a: línea de <3 partes no-sentinel ⇒ la carga debe fallar visible (fail-loud)',
+  );
+  assert.equal(typeof r.error, 'string', 'P15a: el rechazo lleva un error');
+  assert.ok(r.error.length > 0, 'P15a: el error es un string no vacío');
+  assert.equal(
+    r.profiles,
+    undefined,
+    'P15a (atomicidad R-8, todo-o-nada): ni la línea válida del mismo texto se registra',
+  );
+});
+
+test('P15b_bridgeurl_invalida_fail_loud', () => {
+  assert.ok(rules, AUSENTE);
+  const VALIDA = `${B} ${TOKEN_A} example.com/project\n`;
+  const control = rules.parseRules(VALIDA);
+  assert.equal(control.ok, true, 'P15b control: la línea válida por sí sola carga');
+  assert.equal(control.profiles.length, 1, 'P15b control: un solo perfil');
+
+  // 3 partes, token no vacío, ≥1 token de dominio — pero bridgeUrl NO es http(s)
+  // válida. El dominio del perfil malformado (example.org) es distinto del de la
+  // línea válida (example.com), para que el fallo solo pueda provenir de P15 y no
+  // de un solape entre perfiles.
+  const r = rules.parseRules(`notaurl T example.org\n${VALIDA}`);
+  assert.equal(
+    r.ok,
+    false,
+    'P15b: bridgeUrl inválida (no http(s)) ⇒ la carga debe fallar visible (fail-loud)',
+  );
+  assert.equal(typeof r.error, 'string', 'P15b: el rechazo lleva un error');
+  assert.ok(r.error.length > 0, 'P15b: el error es un string no vacío');
+  assert.equal(
+    r.profiles,
+    undefined,
+    'P15b (atomicidad R-8, todo-o-nada): ni la línea válida del mismo texto se registra',
+  );
 });
