@@ -1684,6 +1684,19 @@ const handlers = {
   },
 
   async getCurrentTab(params, profile) {
+    // fb-026-004 P7 (D5): con tab pin, la pestaña "actual" del agente es la
+    // FIJADA (`tabs.get(tabId)`, NO la activa de ninguna ventana). Sin fallback a
+    // la activa global. Si no existe o su URL fresca no resuelve al perfil ⇒ null.
+    if (profile?.pin?.mode === 'tab') {
+      let tab = null;
+      try {
+        tab = await browser.tabs.get(profile.pin.tabId);
+      } catch {
+        return null;
+      }
+      if (!tab || getProfileForUrl(tab.url)?.id !== profile.id) return null;
+      return { id: tab.id, title: tab.title, url: tab.url };
+    }
     // fb-026-003 P6/D9: con window pin, la activa se busca en la ventana FIJADA
     // (windowId explícito, NO `currentWindow` —que devolvería la del usuario—).
     // Sin pin: query actual intacta (D6). Sin fallback a la activa global: si la
@@ -2224,7 +2237,11 @@ const handlers = {
     // sondea sólo la ventana fijada (la lectura captura windowId además de url).
     const candidates = await Promise.all([...profile.tabs].map(async (tabId) => {
       const tab = await browser.tabs.get(tabId).then((t) => t, () => undefined);
-      return { tabId, url: tab?.url, windowId: tab?.windowId };
+      // fb-026-004 P8 (D5): `id` se incluye para que el filtro `inPin` (mode-aware)
+      // sea tab-aware — el candidato llevaba sólo `tabId` (nombre legacy) y el
+      // ternario compara `tab.id === pin.tabId`. Con tab pin se sondea sólo la
+      // pestaña fijada.
+      return { tabId, id: tab?.id, url: tab?.url, windowId: tab?.windowId };
     }));
     const tabs = candidates.filter((t) =>
       getProfileForUrl(t.url)?.id === profile.id && inPin(t, profile));
