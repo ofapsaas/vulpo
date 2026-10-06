@@ -41,16 +41,21 @@ if (versionEl) versionEl.textContent = `v${browser.runtime.getManifest().version
 // State
 let allBridges = [];
 let currentStatus = null;
+// fb-026-003 D8: windowId de la ventana del popup (de la pestaña activa), para
+// fijar el perfil a ESTA ventana sin depender de windows.getCurrent() (H2).
+let currentWindowId = null;
 
 // ============================================================
 // Main
 // ============================================================
 async function refresh() {
   try {
+    // fb-026-003 D8: leer la ventana del popup ANTES de renderizar, para que el
+    // toggle de pin tenga el windowId disponible en el primer render.
+    const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+    currentWindowId = tab ? tab.windowId : null;
     currentStatus = await browser.runtime.sendMessage({ type: 'getStatus' });
     render();
-    // Also get current tab info
-    const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
     if (tab && tabCount) {
       tabCount.textContent = tab.url || '-';
     }
@@ -130,9 +135,26 @@ function render() {
           }
         };
 
+        // fb-026-003 D8: toggle de pin por bridge, junto al botón Plan/Build.
+        // Refleja el estado leyendo `pin` de getStatus y manda setPin/clearPin
+        // con el windowId explícito de la ventana del popup.
+        const pinned = b.pin?.mode === 'window';
+        const pinBtn = document.createElement('button');
+        pinBtn.className = 'bridge-pin-btn' + (pinned ? ' pinned' : '');
+        pinBtn.textContent = pinned ? '📌 Window' : '📍 Pin';
+        pinBtn.title = pinned ? 'Fijado a esta ventana (click para soltar)' : 'Fijar a esta ventana';
+        pinBtn.disabled = !pinned && currentWindowId == null;
+        pinBtn.onclick = async () => {
+          const res = pinned
+            ? await browser.runtime.sendMessage({ type: 'clearPin', profileId: b.id })
+            : await browser.runtime.sendMessage({ type: 'setPin', profileId: b.id, mode: 'window', windowId: currentWindowId });
+          if (res && !res.error) refresh();
+        };
+
         item.appendChild(name);
         item.appendChild(info);
         item.appendChild(planBtn);
+        item.appendChild(pinBtn);
         if (b.connected) item.appendChild(discBtn);
         bridgeList.appendChild(item);
       }
