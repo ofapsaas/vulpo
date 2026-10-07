@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 
 	"vulpo/server/internal/odooregistry"
 )
@@ -32,46 +31,36 @@ const (
 var errOdooNoTab = fmt.Errorf("%s: No Odoo tab detected. Open an Odoo tab and log in, or pass the tabId of a detected Odoo tab (see list_available_profiles).", codeOdooNoTab)
 
 // odooTabResolver: resuelve la pestaña Odoo de cada llamada ORM contra el
-// registry, con detección bajo demanda (D-6) y memoria de la última falla de
-// comando por token (§2.1 condición iii).
+// registry. El cache es memo de una sola llamada, no autoridad de pertenencia:
+// el resolver corre un Detect (pin-aware) en TODA llamada (fb-027-004 §2.1/D2).
 type odooTabResolver struct {
 	registry *odooregistry.Registry
 	hub      Hub
-
-	mu        sync.Mutex
-	failedTab map[string]int // token → tabId cuyo último comando ORM falló
 }
 
 func newOdooTabResolver(registry *odooregistry.Registry, hub Hub) *odooTabResolver {
-	return &odooTabResolver{registry: registry, hub: hub, failedTab: map[string]int{}}
+	return &odooTabResolver{registry: registry, hub: hub}
 }
 
-// resolve: aplica §2.1. Corre como máximo un Detect por llamada.
+// resolve: resuelve la pestaña Odoo de la llamada. Corre SIEMPRE un Detect
+// (pin-aware) antes de resolver — el pin es estado de la extensión y puede
+// cambiar en cualquier momento (fb-027-004 P5/P6). El Detect vive DENTRO de
+// resolve, DESPUÉS de la validación de argumentos del handler (R-2): un error
+// de validación no emite ningún command.
 func (r *odooTabResolver) resolve(params map[string]any, token string) (*odooTarget, error) {
 	requested, hasRequest, err := requestedOdooTabID(params)
 	if err != nil {
 		return nil, err
 	}
 
-	candidates := r.candidates(token)
-	mustDetect := len(candidates) == 0 || (hasRequest && !containsTab(candidates, requested))
-	if mustDetect {
-		if candidates, err = r.detect(token); err != nil {
-			return nil, err
-		}
+	candidates, err := r.detect(token)
+	if err != nil {
+		return nil, err
 	}
 
 	profile, err := pickOdooTab(candidates, requested, hasRequest)
 	if err != nil {
 		return nil, err
-	}
-	if !mustDetect && r.lastCommandFailed(token, profile.TabID) {
-		if candidates, err = r.detect(token); err != nil {
-			return nil, err
-		}
-		if profile, err = pickOdooTab(candidates, requested, hasRequest); err != nil {
-			return nil, err
-		}
 	}
 	return &odooTarget{resolver: r, token: token, profile: profile, tab: strconv.Itoa(profile.TabID)}, nil
 }
@@ -91,27 +80,7 @@ func (r *odooTabResolver) detect(token string) ([]odooregistry.OdooTabProfile, e
 	if err := r.registry.Detect(token, odooHubAdapter{h: r.hub}); err != nil {
 		return nil, fmt.Errorf("%s: %v; fix the Odoo tab (log in or reload it) and retry", codeOdooDetectionFailed, err)
 	}
-	r.mu.Lock()
-	delete(r.failedTab, token)
-	r.mu.Unlock()
 	return r.candidates(token), nil
-}
-
-func (r *odooTabResolver) lastCommandFailed(token string, tabID int) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	failed, ok := r.failedTab[token]
-	return ok && failed == tabID
-}
-
-func (r *odooTabResolver) recordCommandOutcome(token string, tabID int, failed bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if failed {
-		r.failedTab[token] = tabID
-		return
-	}
-	delete(r.failedTab, token)
 }
 
 // requestedOdooTabID: `tabId` (número o string numérico) o el alias no
@@ -149,15 +118,6 @@ func parseOdooTabID(v any) (int, error) {
 		}
 	}
 	return 0, fmt.Errorf("tabId must be an integer or a numeric string, got %v", v)
-}
-
-func containsTab(profiles []odooregistry.OdooTabProfile, tabID int) bool {
-	for _, p := range profiles {
-		if p.TabID == tabID {
-			return true
-		}
-	}
-	return false
 }
 
 // pickOdooTab: con tabId, esa pestaña si es candidata; sin tabId, agrupa por
@@ -218,7 +178,6 @@ type odooTarget struct {
 // categoriza el error del hub (§2.3).
 func (t *odooTarget) command(cmd Command) (any, error) {
 	res, err := t.resolver.hub.Command(t.token, cmd)
-	t.resolver.recordCommandOutcome(t.token, t.profile.TabID, err != nil)
 	if err != nil {
 		return nil, t.commandError(cmd, err)
 	}
