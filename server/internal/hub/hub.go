@@ -389,7 +389,15 @@ func (h *Hub) handleMessage(p *Profile, msg map[string]any) {
 			return
 		}
 		if msg["type"] == "response" {
-			entry.resolve(msg["result"])
+			// P4 (fb-027-005): la PRESENCIA de `result` distingue "null presente"
+			// de "ausente". Un response sin `result` es malformado (la extensión
+			// conforme siempre lo manda) ⇒ se rechaza con error, en vez de
+			// colapsarlo con null o dejarlo colgado hasta el timeout.
+			if v, present := msg["result"]; present {
+				entry.resolve(v)
+			} else {
+				entry.reject(errors.New("malformed response: missing result"))
+			}
 		} else {
 			entry.reject(errors.New(fmt.Sprintf("%v", msg["error"])))
 		}
