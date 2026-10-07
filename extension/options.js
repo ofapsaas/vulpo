@@ -38,11 +38,28 @@ async function loadRules() {
   }
 }
 
-// Show status message
+// Show status message. O6 (review Etapa 4): el estado WARNING NO se auto-borra
+// (con varios avisos el operador no llegaría a leerlos) — se limpia al próximo
+// `input` o al guardar. Los demás estados conservan el auto-clear a los 5 s.
+let statusTimer = null;
 function showStatus(msg, type) {
+  if (statusTimer) { clearTimeout(statusTimer); statusTimer = null; }
   statusMsg.textContent = msg;
   statusMsg.className = `status ${type}`;
-  setTimeout(() => { statusMsg.className = 'status'; }, 5000);
+  if (type !== 'warning') {
+    statusTimer = setTimeout(() => {
+      statusMsg.className = 'status';
+      statusMsg.textContent = '';
+      statusTimer = null;
+    }, 5000);
+  }
+}
+
+// Limpia el estado visible (un warning persistente desaparece al editar).
+function clearStatus() {
+  if (statusTimer) { clearTimeout(statusTimer); statusTimer = null; }
+  statusMsg.className = 'status';
+  statusMsg.textContent = '';
 }
 
 // Validación — consume el MISMO seam que el background (VulpoRules.parseRules,
@@ -121,6 +138,7 @@ rulesInput.addEventListener('keydown', (e) => {
 // Live validation (fb-027-001 P23): rojo SÓLO por infraestructura (bundle
 // ausente); los warnings se reflejan en amarillo y NO bloquean el guardado.
 rulesInput.addEventListener('input', () => {
+  clearStatus(); // O6: el warning persistente se limpia al editar
   const result = validateText(rulesInput.value);
   if (!result.ok) {
     rulesInput.style.borderColor = 'var(--danger)';
