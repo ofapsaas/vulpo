@@ -57,15 +57,19 @@ function globRegex(glob) {
 // ── Descomposición del patrón ───────────────────────────────────────────────
 
 /**
- * Descompone un token de dominio en host + path (con globs).
+ * Descompone un token de dominio en host + path (con globs) y devuelve su
+ * forma canónica para almacenar (`canonical`, spec §2.2): host tal como lo
+ * escribió el operador + path recortado; el vacío-tras-recorte es host-only.
  * @param {string} token
- * @returns {{catchAll: boolean, host: object|null, path: string|null}|null}
+ * @returns {{catchAll: boolean, host: object|null, path: string|null, canonical: string}|null}
  *   `null` si el token no es interpretable (`*` pelado, `://`, host sin
- *   alfanumérico, label vacío o con `-` inicial/final, path vacío/inválido):
- *   `parseRules` lo saltea con warning (fail-closed) y `matchDomain` → false.
+ *   alfanumérico, label vacío o con `-` inicial/final, segmento de path
+ *   inválido): `parseRules` lo saltea con warning (fail-closed) y
+ *   `matchDomain` → false. Un path VACÍO tras el recorte NO es inválido: es
+ *   host-only (B2 de la review).
  */
 function parsePattern(token) {
-  if (token === '**') return { catchAll: true, host: null, path: null };
+  if (token === '**') return { catchAll: true, host: null, path: null, canonical: '**' };
   if (token === '*') return null;
 
   const slash = token.indexOf('/');
@@ -78,10 +82,16 @@ function parsePattern(token) {
   let path = null;
   if (rawPath !== null) {
     path = parsePath(rawPath);
-    if (path === null) return null;
+    if (path === null) return null; // segmento inválido ⇒ token descartado
+    if (path === '') path = null;   // vacío tras recorte ⇒ host-only (B2)
   }
 
-  return { catchAll: false, host, path };
+  // Forma canónica del dominio almacenado (§2.2, normativo): `example.com/` y
+  // `example.com//` → `example.com`; `example.com//products` y
+  // `example.com/products/` → `example.com/products`. La caja del host NO se
+  // normaliza en storage (se resuelve en el matching).
+  const canonical = path === null ? hostPart : `${hostPart}/${path}`;
+  return { catchAll: false, host, path, canonical };
 }
 
 /**
@@ -110,13 +120,16 @@ function parseHost(hostPart) {
 }
 
 /**
- * Path válido (spec §2.2): se recortan `/` iniciales/finales (como hoy); si
- * queda vacío ⇒ sin path. Segmentos no vacíos y sin espacios/`?`/`#`.
- * @returns {string|null} el path normalizado, o `null` si es inválido (≠ "sin path").
+ * Path válido (spec §2.2): se recortan `/` iniciales/finales (como hoy). El
+ * resultado VACÍO tras el recorte significa "sin path" (host-only) y NO es
+ * inválido — se distingue de un segmento malo (B2 de la review). Segmentos no
+ * vacíos y sin espacios/`?`/`#`.
+ * @returns {string|null} el path normalizado (posiblemente `''` = host-only),
+ *   o `null` si es inválido (segmento malo).
  */
 function parsePath(rawPath) {
   const p = rawPath.replace(/^\/+|\/+$/g, '');
-  if (p === '') return null; // "example.com/" ⇒ host sin path (preservado)
+  if (p === '') return ''; // "example.com/" ⇒ vacío tras recorte ⇒ host-only (B2)
   for (const segment of p.split('/')) {
     if (!/^[^\s?#]+$/.test(segment)) return null;
   }
@@ -310,6 +323,8 @@ export function parseRules(text) {
 
     // Tokens de dominio: un token ilegible se SALTEA (la línea conserva sus
     // otros dominios); nunca degrada a un match más amplio (fail-closed, P13).
+    // Se almacena la forma CANÓNICA (`pattern.canonical`, §2.2): el recorte de
+    // "/" del path es normativo y el matcher no reconoce la forma cruda (B2).
     let domains = [];
     for (const domain of parts.slice(2)) {
       const pattern = parsePattern(domain);
@@ -317,7 +332,7 @@ export function parseRules(text) {
         warn('invalid_domain', lineNo, `invalid domain "${domain}" (line "${line}") — token descartado`, domain);
         continue;
       }
-      domains.push(domain);
+      domains.push(pattern.canonical);
       if (!pattern.catchAll && isBroadGlob(pattern.host)) {
         warn('broad_glob', lineNo, `broad host glob "${domain}" (line "${line}") — el perfil carga tal cual; revisá el alcance`, domain);
       }

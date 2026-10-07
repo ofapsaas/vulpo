@@ -47,7 +47,7 @@ var VulpoRules = (() => {
     return new RegExp("^" + globToRegexSource(glob) + "$");
   }
   function parsePattern(token) {
-    if (token === "**") return { catchAll: true, host: null, path: null };
+    if (token === "**") return { catchAll: true, host: null, path: null, canonical: "**" };
     if (token === "*") return null;
     const slash = token.indexOf("/");
     const hostPart = slash === -1 ? token : token.slice(0, slash);
@@ -58,8 +58,10 @@ var VulpoRules = (() => {
     if (rawPath !== null) {
       path = parsePath(rawPath);
       if (path === null) return null;
+      if (path === "") path = null;
     }
-    return { catchAll: false, host, path };
+    const canonical = path === null ? hostPart : `${hostPart}/${path}`;
+    return { catchAll: false, host, path, canonical };
   }
   function parseHost(hostPart) {
     if (hostPart === "") return null;
@@ -78,7 +80,7 @@ var VulpoRules = (() => {
   }
   function parsePath(rawPath) {
     const p = rawPath.replace(/^\/+|\/+$/g, "");
-    if (p === "") return null;
+    if (p === "") return "";
     for (const segment of p.split("/")) {
       if (!/^[^\s?#]+$/.test(segment)) return null;
     }
@@ -207,7 +209,7 @@ var VulpoRules = (() => {
           warn("invalid_domain", lineNo, `invalid domain "${domain}" (line "${line}") \u2014 token descartado`, domain);
           continue;
         }
-        domains.push(domain);
+        domains.push(pattern.canonical);
         if (!pattern.catchAll && isBroadGlob(pattern.host)) {
           warn("broad_glob", lineNo, `broad host glob "${domain}" (line "${line}") \u2014 el perfil carga tal cual; revis\xE1 el alcance`, domain);
         }
