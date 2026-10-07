@@ -316,13 +316,16 @@ async function guardedCommand(cmdName, params, profileId, command) {
   const profile = profiles.get(profileId);
   if (!profile) throw new Error(`Profile "${profileId}" not found`);
 
-  // fb-026-004 P9/P10 (D3/R-4): con tab pin, el agente fijado a una pestaña NO
-  // abre ni cierra pestañas. Denegación fail-closed en el punto único, POR ENCIMA
-  // del pre-chequeo de acceso: `openTab` no lleva tabId (no lo alcanzaría) y
-  // `closeTab` sí (sobre la pestaña fijada pasaría owned∧inPin). Va también antes
-  // de la rama window-pin de openTab (que si no caería al tabs.create genérico).
-  if (profile.pin?.mode === 'tab' && (cmdName === 'openTab' || cmdName === 'closeTab')) {
-    throw new Error(`Access denied: ${cmdName} is not allowed while pinned to a tab`);
+  // fb-026-004 P9/P10 (D3/R-4) + fb-027-002 P6 (D2): denegación fail-closed en el
+  // punto único, POR ENCIMA del pre-chequeo de acceso. `closeTab` se deniega bajo
+  // CUALQUIER pin (tab o window): el ancla del pin no debe ser destruible por el
+  // agente — cerrar las pestañas de la ventana fijada la vaciaría y
+  // `windows.onRemoved` soltaría el pin. Se evalúa antes del pre-chequeo porque
+  // una pestaña propia de la ventana fijada pasa owned∧inPin. `openTab` sigue
+  // denegado sólo con tab pin (bajo window pin se permite crear en la ventana
+  // fijada, 003-P8). El mensaje se generaliza para ser correcto en ambos modos.
+  if (profile.pin && (cmdName === 'closeTab' || (profile.pin.mode === 'tab' && cmdName === 'openTab'))) {
+    throw new Error(`Access denied: ${cmdName} is not allowed while pinned`);
   }
 
   // — Pre: tab access control —
