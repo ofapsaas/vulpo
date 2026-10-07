@@ -660,3 +660,91 @@ test('P18d_asterisco_en_path_es_glob_valido', () => {
     assert.deepEqual(r.profiles[0].domains, [dominio], `P18d: el glob de path se conserva (${dominio})`);
   }
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// §2.2 — cláusula de RECORTE de "/" (NO numerada como P; hueco del AUDIT)
+// RED de regresión — B2 de la review de Etapa 4
+// ════════════════════════════════════════════════════════════════════════════
+//
+// El spec §2.2 define `path := segment ( "/" segment )*` con
+// `se recortan "/" iniciales/finales (como hoy)`. Un token con barra final
+// (`example.com/`) es un perfil HOST-ONLY: el path vacío tras el recorte se
+// normaliza a `example.com` y matchea cualquier path del host.
+//
+// Regresión medida (review B2, sonda OLD→NEW): la implementación actual
+// DESCARTA el token entero
+//   (`{ok:true, profiles:[], warnings:[invalid_domain, invalid_line]}`),
+// la misma familia C1 (token del operador rechazado) que la feature vino a
+// cerrar. RED esperado: AssertionError en `profiles.length` (`ok` se asertó
+// primero y `profiles` es un arreglo ⇒ no hay TypeError, RED válido).
+
+test('fb027_B2_path_vacio_tras_recorte_es_host_only', () => {
+  assert.ok(rules, AUSENTE);
+  for (const token of ['example.com/', 'example.com//']) {
+    const r = rules.parseRules(`${B} ${TOKEN_A} ${token}\n`);
+    assert.equal(r.ok, true, `B2: \`${token}\` no tumba la carga (recorte de §2.2)`);
+    assert.ok(Array.isArray(r.profiles), `B2: \`${token}\` ⇒ profiles es un arreglo`);
+    assert.equal(r.profiles.length, 1, `B2: \`${token}\` carga como UN perfil host-only`);
+    assert.equal(r.warnings.length, 0, `B2: \`${token}\` NO es inválido ⇒ sin warnings`);
+    assert.deepEqual(
+      r.profiles[0].domains,
+      ['example.com'],
+      `B2: \`${token}\` se normaliza a \`example.com\` (recorte de "/" finales)`,
+    );
+    // Host-only: el perfil matchea CUALQUIER path del host.
+    assert.equal(
+      rules.resolveProfile('https://example.com/loquesea', r.profiles),
+      r.profiles[0],
+      `B2: \`${token}\` matchea cualquier path del host (host-only)`,
+    );
+    assert.equal(
+      rules.matchDomain('https://example.com/a/b', r.profiles[0].domains[0]),
+      true,
+      `B2: \`${token}\` es host-only (el dominio normalizado matchea un subpath)`,
+    );
+  }
+});
+
+// §2.2 — `path` NO vacío: se recortan "/" iniciales/finales.
+//   `example.com//products`  ⇒ tras el separador el path es `/products`; el "/"
+//                              inicial se recorta ⇒ `example.com/products`.
+//   `example.com/products/`  ⇒ el "/" final se recorta ⇒ `example.com/products`.
+// RED esperado: AssertionError en la normalización de `domains` (hoy se conserva
+// el token tal cual, con las barras). El recorte preserva la semántica de
+// prefijo con frontera de segmento (fb-026 P2) y NO amplía el alcance.
+
+test('fb027_B2_path_con_barras_se_recorta_a_canonico', () => {
+  assert.ok(rules, AUSENTE);
+  const casos = [
+    ['example.com//products', 'example.com/products'], // "/" inicial del path
+    ['example.com/products/', 'example.com/products'], // "/" final del path
+  ];
+  for (const [token, esperado] of casos) {
+    const r = rules.parseRules(`${B} ${TOKEN_A} ${token}\n`);
+    assert.equal(r.ok, true, `B2: \`${token}\` no tumba la carga`);
+    assert.ok(Array.isArray(r.profiles), `B2: \`${token}\` ⇒ profiles es un arreglo`);
+    assert.equal(r.profiles.length, 1, `B2: \`${token}\` carga como UN perfil`);
+    assert.equal(r.warnings.length, 0, `B2: \`${token}\` NO es inválido ⇒ sin warnings`);
+    assert.deepEqual(
+      r.profiles[0].domains,
+      [esperado],
+      `B2: \`${token}\` se normaliza a \`${esperado}\` (recorte de "/" iniciales/finales)`,
+    );
+    // El recorte preserva la semántica de prefijo con frontera de segmento.
+    assert.equal(
+      rules.matchDomain('https://example.com/products', r.profiles[0].domains[0]),
+      true,
+      `B2: \`${token}\` matchea /products`,
+    );
+    assert.equal(
+      rules.matchDomain('https://example.com/products/x', r.profiles[0].domains[0]),
+      true,
+      `B2: \`${token}\` matchea /products/x (frontera de segmento)`,
+    );
+    assert.equal(
+      rules.matchDomain('https://example.com/otro', r.profiles[0].domains[0]),
+      false,
+      `B2: \`${token}\` NO matchea /otro (fail-closed)`,
+    );
+  }
+});
