@@ -497,14 +497,27 @@ func TestListAvailableProfiles_PropagatesHubError(t *testing.T) {
 	}
 }
 
-// --- PC8: un único registry compartido — un tab detectado queda routable sin
-//          re-detect (odooDetectTabs emitido exactamente 1 vez). ---
-
+// --- PC8: un único registry compartido — un tab detectado queda routable.
+//
+// fb-027-004 (ENMIENDA fb-020-006 D-6/PC8/I-4, spec §2.3, audit §2.1 R-1): el
+// resolve corre Detect INCONDICIONALMENTE en toda llamada ORM (c-full) ⇒
+// odooDetectTabs se emite EXACTAMENTE 2 veces (uno por tool: list_available_profiles
+// + search_read), no 1. Doble reformulación justificada:
+//   (1) conteo ==1 → ==2;
+//   (2) sembrar hub.detectByToken (hoy el test NO lo usa y entre las dos llamadas
+//       reescribe hub.result = map{...}): bajo (c-full) el 2º Detect leería
+//       detectByToken (nil) → caería a hub.result (un map, no una lista de
+//       perfiles) ⇒ search_read fallaría ANTES del assert del conteo.
+//       No se usa seedDetect (emite su propio Detect y cambiaría el conteo):
+//       se siembra detectByToken + el resultado ORM por separado.
 func TestSharedRegistry_SingleDetectRoutable(t *testing.T) {
 	s, hub, _ := newOdooTools(t)
 	requireTool(t, s, "list_available_profiles")
 	requireTool(t, s, "search_read")
 
+	// fb-027-004: extensión fake por token — el Detect incondicional de resolve
+	// (c-full) devuelve siempre la tab 7 para profA.
+	hub.detectByToken = map[string][]map[string]any{"profA": {profileTab7()}}
 	hub.result = []map[string]any{profileTab7()}
 	if _, err := callOdooTool(t, s, "list_available_profiles", map[string]any{}, "profA"); err != nil {
 		t.Fatalf("list_available_profiles error: %v", err)
@@ -523,8 +536,8 @@ func TestSharedRegistry_SingleDetectRoutable(t *testing.T) {
 	if profileID != "profA" {
 		t.Fatalf("profileID = %q, want profA", profileID)
 	}
-	if n := countCommand(hub, "odooDetectTabs"); n != 1 {
-		t.Fatalf("odooDetectTabs emitido %d veces, want 1 (sin re-detect)", n)
+	if n := countCommand(hub, "odooDetectTabs"); n != 2 {
+		t.Fatalf("odooDetectTabs emitido %d veces, want 2 (uno por tool — fb-027-004 §2.3/PC8)", n)
 	}
 }
 
