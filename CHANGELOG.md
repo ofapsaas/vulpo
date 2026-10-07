@@ -2,6 +2,49 @@
 
 All notable changes to Vulpo are documented here. Format: Keep a Changelog.
 
+## [0.5.6] — 2026-10-07
+
+### Security
+
+- **The agent can no longer shed its own scope.** Navigating a tab out of the
+  agent's assigned domains does not release the pin, and while a pin is set
+  the agent cannot close it — nor any other tab — so the pinned window or tab
+  can no longer be emptied to drop the anchor. The pin is released only by the
+  operator's action or by the anchor's own disappearance (its tab or window
+  closing).
+
+- **The Odoo tab registry no longer exposes tabs outside the agent's scope.**
+  `list_available_profiles` reports only the tabs inside the active scope, and
+  every Odoo call re-resolves its tab with a scope-aware detection, so a stale
+  registry entry can never be used to reach a tab the agent does not own.
+
+### Fixed
+
+- **A response that omits `result` is malformed, not empty.** The relay now
+  tells the presence of `result` apart from its value: a frame carrying
+  `result: null` is a valid result (the agent receives `null`) and a frame
+  without the key is rejected with an error, instead of both collapsing into a
+  silent `null`. The extension normalizes a handler's `undefined` return into
+  an explicit `null`, so the two cases can no longer be confused.
+
+- **The pin control can no longer get stuck.** A failure while reading the pin
+  state clears the pin and refreshes, so the operator can always return to "no
+  pin"; the popup shows the pin state unambiguously.
+
+### Added
+
+- **Host + path scope rules, with wildcards.** An agent's scope is now defined
+  by host and path patterns (`*` matches inside both), with an explicit
+  fail-closed direction: an unreadable rule is discarded, never widened. The
+  Options page reports the rule warnings and never clears them on its own.
+
+### Changed
+
+- **Tab handlers no longer steal focus.** Opening or activating a tab on the
+  agent's behalf works in the background and does not move the user's focus;
+  under a pin, `getCurrentTab` answers with the pinned tab and the Odoo
+  detection is tab-aware.
+
 ## [0.5.5] — 2026-10-05
 
 ### Added

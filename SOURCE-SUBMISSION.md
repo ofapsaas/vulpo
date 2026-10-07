@@ -1,6 +1,6 @@
 # Source submission notes (for AMO reviewers)
 
-Add-on: **Vulpo MCP — Browser Bridge** (`vulpo@pablorizzo.com`, v0.5.5)
+Add-on: **Vulpo MCP — Browser Bridge** (`vulpo@pablorizzo.com`, v0.5.6)
 Repository: <https://github.com/ofapsaas/vulpo> (this archive is the exact
 source tree of the submitted version — additional context only; this package
 is the authoritative source for review).
@@ -21,7 +21,7 @@ cd ../odoo       && npm ci
 
 # 2. build the XPI (regenerates all 4 esbuild bundles + zips the extension)
 cd ../.. && bash scripts/build-xpi.sh
-# → dist/vulpo-0.5.5.xpi
+# → dist/vulpo-0.5.6.xpi
 ```
 
 - The four generated files included in the extension — `frame-serializer.js`,

@@ -40,7 +40,7 @@ const MCPProtocolVersion = "2025-06-18"
 // ser igual a "version" de extension/manifest.json — lo pinea TestVersionPin.
 // Negociación: la extensión la manda en register (y el hub avisa en welcome),
 // el kit la manda como clientInfo.version (vlpmcp) y doctor la compara.
-const ProductVersion = "0.5.5"
+const ProductVersion = "0.5.6"
 
 // Hub: interfaz mínima que las tools consumen (ruteo hacia la extensión).
 // *hub.Hub (003) la satisface.
