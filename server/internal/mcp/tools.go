@@ -1270,9 +1270,12 @@ func registerOdooTools(s *Server, hub Hub, odoo *odooregistry.Registry) {
 		},
 	})
 
-	// 11. list_available_profiles (§2.1 fila 11) — especial: Detect + List del
-	// registry. Shape de 8 campos congelado fb-013; la diferencia con los
-	// perfiles de conexión de mcp.odoo viaja en la Description (D-8).
+	// 11. list_available_profiles (§2.1 fila 11) — especial: Detect + ListActive
+	// del registry. Expone SÓLO las entradas activas del último Detect
+	// pin-aware (fb-027-004 P1/P3): la metadata de tabs fuera del pin no es
+	// observable por el agente. Shape de 8 campos congelado fb-013; la
+	// diferencia con los perfiles de conexión de mcp.odoo viaja en la
+	// Description (D-8).
 	s.RegisterTool(Tool{
 		Name: "list_available_profiles",
 		Description: "List Odoo tabs/profiles detected with their session info." + odooDescBase +
@@ -1282,7 +1285,7 @@ func registerOdooTools(s *Server, hub Hub, odoo *odooregistry.Registry) {
 			if err := odoo.Detect(token, adapter); err != nil {
 				return nil, err
 			}
-			return odoo.List(token), nil
+			return odoo.ListActive(token), nil
 		},
 	})
 

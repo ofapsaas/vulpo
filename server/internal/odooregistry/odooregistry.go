@@ -139,6 +139,24 @@ func (r *Registry) List(profileID string) []OdooTabProfile {
 	return out
 }
 
+// ListActive devuelve sólo los perfiles activos (los devueltos por el último
+// Detect pin-aware) de un profileID. Es la vista que expone la tool
+// list_available_profiles: el server no mantiene autoridad de pertenencia
+// entre llamadas, así que no debe exponer la metadata de tabs inactivas
+// (fb-027-004 §2.1, P1/P3). List conserva su contrato (activas e inactivas).
+func (r *Registry) ListActive(profileID string) []OdooTabProfile {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	ents := r.cache[profileID]
+	out := make([]OdooTabProfile, 0, len(ents))
+	for _, e := range ents {
+		if e.profile.IsActive {
+			out = append(out, e.profile)
+		}
+	}
+	return out
+}
+
 // Lookup devuelve perfil + token para un tabId (string; TabID es int).
 //
 // ⚠️ SECURITY: Lookup es GLOBAL (itera el cache de TODOS los tokens). El caller
