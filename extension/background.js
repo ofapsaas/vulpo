@@ -727,12 +727,13 @@ function reconnectAllProfiles() {
 // ============================================================
 
 /**
- * fb-026-004 P13/P14 (D6/D7): auto-despineo del tab pin. Suelta el pin del perfil
- * cuya pestaña fijada se cerró o dejó de resolverle. NO es una segunda autoridad
- * de pertenencia (P17): es el release del término `profile.pin`. Se invoca en los
- * tres caminos de baja: unregisterTab (cierre vía tabs.onRemoved + historial fuera
- * de scope vía unregisterIfOutOfScope) y registerTab (full/redirect con cambio de
- * perfil). El release del window pin (windows.onRemoved) NO se toca.
+ * fb-027-002 P10/P11 (enmienda fb-026-004 D6/D7): release del tab pin. Se invoca
+ * SÓLO desde el listener `tabs.onRemoved` (cierre real de la pestaña fijada) — su
+ * único call site. Un cambio de URL de la pestaña fijada (navegación de página
+ * completa, redirect o historial goBack/goForward) ya NO libera el pin: queda
+ * inerte mientras la pestaña está fuera de scope y vivo al volver. NO es una
+ * segunda autoridad de pertenencia: sólo muta el término `profile.pin`. El
+ * window pin se libera en `windows.onRemoved`, que no se toca.
  */
 function releaseTabPin(tabId) {
   for (const profile of profiles.values()) {
@@ -748,18 +749,10 @@ function releaseTabPin(tabId) {
  */
 function registerTab(tabId, url) {
   const profile = getProfileForUrl(url);
-  // fb-026-004 P14 (D6/R-6): navegación de página completa/redirect (tabs.onUpdated
-  // changeInfo.url). La pestaña fijada deja de resolver al perfil dueño del pin ⇒
-  // se suelta. Condición: la URL nueva resuelve a OTRO perfil (o a ninguno).
-  // Navegar DENTRO del scope NO lo suelta (evita el falso positivo R-6): si el
-  // dueño del pin sigue siendo el perfil resuelto, el pin se conserva.
-  const newOwnerId = profile?.id ?? null;
-  for (const p of profiles.values()) {
-    if (p.pin?.mode === 'tab' && p.pin.tabId === tabId && p.id !== newOwnerId) {
-      releaseTabPin(tabId);
-      break;
-    }
-  }
+  // fb-027-002 P1 (enmienda fb-026-004 P14/D6): un cambio de URL de la pestaña
+  // fijada (navegación de página completa/redirect) YA NO libera el pin. El pin
+  // queda inerte si la URL deja de resolver al perfil y vivo si vuelve. El release
+  // sólo ocurre por cierre real de la pestaña (tabs.onRemoved).
   if (!profile) {
     // Remove from any old profile
     for (const p of profiles.values()) {
@@ -787,10 +780,10 @@ function registerTab(tabId, url) {
  * Remove a tab from its profile.
  */
 function unregisterTab(tabId) {
-  // fb-026-004 P13/P14 (D6/D7): cierre de la pestaña fijada (tabs.onRemoved) o
-  // baja por historial fuera de scope (unregisterIfOutOfScope delega acá). Suelta
-  // el tab pin con condición exacta por tabId (cerrar OTRA pestaña no lo suelta).
-  releaseTabPin(tabId);
+  // fb-027-002 P10 (enmienda fb-026-004 D7): el desregistro ya NO libera el pin.
+  // El release del tab pin vive sólo en el listener `tabs.onRemoved` (cierre
+  // real). Este camino también se dispara por historial fuera de scope
+  // (`unregisterIfOutOfScope`), que no debe soltar el pin (P5).
   for (const profile of profiles.values()) {
     if (profile.tabs.has(tabId)) {
       profile.tabs.delete(tabId);
@@ -875,6 +868,12 @@ browser.tabs.onCreated.addListener((tab) => {
 
 browser.tabs.onRemoved.addListener((tabId) => {
   unregisterTab(tabId);
+  // fb-027-002 P11/D3: el cierre REAL de la pestaña es el ÚNICO release del tab
+  // pin accionado por evento. No es accionable por el agente: `closeTab` está
+  // denegado bajo cualquier pin (P6), así que sólo el usuario/navegador cierra el
+  // ancla. Condición exacta por tabId dentro de `releaseTabPin` (cerrar OTRA
+  // pestaña no lo suelta).
+  releaseTabPin(tabId);
   navigatingTabs.delete(tabId); // fb-018-006 §2.2.7: sin tab no hay navegación que esperar
   recordNavGuard({ ev: 'removed', tabId });
   emitNavEvent('removed', tabId);
