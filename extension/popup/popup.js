@@ -139,30 +139,43 @@ function render() {
           }
         };
 
-        // fb-026-004 P16 (D8): control de pin de 3 estados — none→window→tab→none.
-        // El estado se lee de `pin.mode` (getStatus); el `title` guía el ciclo y
-        // cada paso manda setPin/clearPin con el id explícito del popup.
+        // fb-027-003 (F2): control de pin de 3 estados — none→window→tab→none.
+        // Etiqueta = ESTADO actual (inequívoca, derivada de getStatus); `title` =
+        // ACCIÓN siguiente. El clic decide la transición desde una lectura FRESCA
+        // de getStatus (P3) y, ante `{error}`, saltea a `none` con clearPin (P6).
         const pinState = b.pin?.mode === 'window' ? 'window' : b.pin?.mode === 'tab' ? 'tab' : 'none';
         const pinBtn = document.createElement('button');
         pinBtn.className = 'bridge-pin-btn' + (pinState !== 'none' ? ' pinned' : '');
-        pinBtn.textContent = pinState === 'window' ? '📌 Window' : pinState === 'tab' ? '📌 Tab' : '📍 Pin';
+        pinBtn.textContent = pinState === 'window' ? '📌 ventana' : pinState === 'tab' ? '📌 pestaña' : '📍 sin pin';
         pinBtn.title = pinState === 'window'
-          ? 'Fijado a esta ventana (click para fijar a esta pestaña)'
+          ? 'Fijar a esta pestaña'
           : pinState === 'tab'
-            ? 'Fijado a esta pestaña (click para soltar)'
+            ? 'Desfijar'
             : 'Fijar a esta ventana';
         pinBtn.disabled = pinState === 'none' ? currentWindowId == null
           : pinState === 'window' ? currentTabId == null
             : false;
         pinBtn.onclick = async () => {
-          const res = pinState === 'none'
+          // P3: el modo sobre el que se actúa proviene de una lectura FRESCA de
+          // getStatus (no del valor capturado en el render) — cierra la carrera
+          // con un release externo y evita actuar sobre un render viejo.
+          const fresh = await browser.runtime.sendMessage({ type: 'getStatus' });
+          const freshPin = fresh?.profiles?.find(p => p.id === b.id)?.pin;
+          const mode = freshPin?.mode === 'window' ? 'window' : freshPin?.mode === 'tab' ? 'tab' : 'none';
+          const res = mode === 'none'
             ? await browser.runtime.sendMessage({ type: 'setPin', profileId: b.id, mode: 'window', windowId: currentWindowId })
-            : pinState === 'window'
+            : mode === 'window'
               ? await browser.runtime.sendMessage({ type: 'setPin', profileId: b.id, mode: 'tab', tabId: currentTabId })
               : await browser.runtime.sendMessage({ type: 'clearPin', profileId: b.id });
-          // P16 (cierra el nit de 003 Optional 2): ante `{error}` refrescar IGUAL
-          // y mostrar el error — no dejar la UI stale con un pin que no cambió.
+          // P6/P7 (núcleo de F2): si la transición falla, el control NO se traba —
+          // saltea el estado fallido aplicando clearPin (⇒ none). ORDEN vinculante:
+          // detectar el {error} → clearPin → refresh (no dejar el refresh sin rama).
+          if (res && res.error) {
+            await browser.runtime.sendMessage({ type: 'clearPin', profileId: b.id });
+          }
+          // P2: tras CUALQUIER clic (éxito o fallo) re-leer getStatus y re-renderizar.
           await refresh();
+          // P8: el error del backend se sigue mostrando (no silencioso).
           if (res && res.error && statusText) statusText.textContent = 'Pin: ' + res.error;
         };
 
