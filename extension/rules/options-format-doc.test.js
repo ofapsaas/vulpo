@@ -1,11 +1,16 @@
 /**
- * options-format-doc.test.js — fb-026-001-host-path-isolation (RED, P14).
+ * options-format-doc.test.js — fb-026-001 (P14) + fb-027-001 (P25) (RED).
  *
- * Verifica P14 de docs/specs/fb-026-001-host-path-isolation/spec.md §2.3:
+ * P14 de docs/specs/fb-026-001-host-path-isolation/spec.md §2.3:
  * la documentación del formato de reglas en `options.html` (label + bloque de
  * ejemplo, ~:73-94) refleja (a) entradas `host`/`host/prefijo` con frontera de
  * segmento, (b) el catch-all se escribe `**` (opt-in explícito), (c) un `*`
- * pelado es inválido / fail-loud — y ya NO presenta `*` como catch-all válido.
+ * pelado es inválido — y ya NO presenta `*` como catch-all válido.
+ *
+ * P25 de docs/specs/fb-027-001-rules-policy-and-globs/spec.md §2.4:
+ * la doc debe documentar globs `*` en host y path, `*.sufijo`, `**` catch-all,
+ * el `*` pelado inválido (ignorado con aviso), y que overlap/token inválido
+ * AVISAN pero la carga CONTINÚA (first-match decide) — ya NO fail-loud.
  *
  * Patrón de doc-test del proyecto (frame/odoosh-proxy-doc.test.js): aserción de
  * contenido sobre el archivo. Ubicación resuelta B-2 del test-audit (comparte el
@@ -138,5 +143,53 @@ test('P14_doc_formato_options_actualizada', () => {
   assert.ok(
     mencionaFailLoudStar,
     'P14: la doc debe mencionar el fail-loud del `*` pelado (no solo un `*` como catch-all)',
+  );
+});
+
+/**
+ * fb-027-001 (P25) — la doc de formato refleja la política nueva (warning, no
+ * fail-loud) y los globs de C2. Extiende el doc-test con 6 aserciones:
+ * globs en host y path, `*.sufijo`, la política warning, "la carga continúa"
+ * (first-match) y el NEGATIVO nuevo: la doc ya NO dice que la carga falla.
+ *
+ * Pitfall de regex: `!/bloquea la carga/i` FALLA contra "no bloquea la carga"
+ * (subcadena) ⇒ el negativo usa `!/carga falla|fail[- ]?loud/i`.
+ */
+test('fb027_P25_doc_globs_y_politica_warning', () => {
+  const doc = leerInfra(PATH_DOC, 'options.html');
+  // Texto plano: las etiquetas HTML no deben ocultar un ejemplo del oráculo.
+  const plano = doc.replace(/<[^>]*>/g, ' ');
+
+  // (1) glob en el HOST (en el medio de un label) — cubre `edu-us-cert*.odoo.com`.
+  assert.ok(
+    /[\w-]+\*\w*\./.test(plano),
+    'P25(1): la doc debe documentar un glob `*` en el host (medio de un label)',
+  );
+
+  // (2) glob en el PATH — cubre `manjaro.org/products*` / `example.com/*`.
+  assert.ok(
+    /\/[\w.-]*\*[\w.-]*/.test(plano),
+    'P25(2): la doc debe documentar un glob `*` en el path',
+  );
+
+  // (3) forma pura `*.sufijo` (reforzar).
+  assert.ok(/\*\.\w/.test(plano), 'P25(3): la doc debe documentar la forma pura `*.sufijo`');
+
+  // (4) política de warning (aviso, no bloqueo).
+  assert.ok(
+    /warning|aviso|advierte|advertencia/i.test(doc),
+    'P25(4): la doc debe declarar la política de warning (aviso, no bloqueo)',
+  );
+
+  // (5) la carga continúa + first-match decide.
+  assert.ok(
+    /contin[uú]a|no bloquea|first[- ]?match|primero que coincide|gana/i.test(doc),
+    'P25(5): la doc debe declarar que la carga continúa y first-match decide',
+  );
+
+  // (6) NEGATIVO nuevo: la doc ya NO dice que la carga falla (fail-loud).
+  assert.ok(
+    !/carga falla|fail[- ]?loud/i.test(doc),
+    'P25(6): la doc ya NO debe declarar que la carga falla (fail-loud)',
   );
 });

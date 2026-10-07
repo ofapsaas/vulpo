@@ -1,27 +1,33 @@
 /**
- * rules.test.js — fb-026-001-host-path-isolation (RED, seam puro).
+ * rules.test.js — fb-027-001-rules-policy-and-globs (RED, seam puro).
  *
- * Verifica P1–P13 y P15 (Enmienda 2, §2.7) de
- * docs/specs/fb-026-001-host-path-isolation/spec.md §2.1/§2.2/§2.3/§2.7
- * y el mapeo test↔postcondición del test-audit.md aprobado (§3).
+ * Verifica P1–P22 de
+ * docs/specs/fb-027-001-rules-policy-and-globs/spec.md §2.1/§2.2/§2.3/§2.4
+ * y el mapeo test↔postcondición del test-audit.md aprobado (§4a/§4b).
  *
- * Escrito SOLO contra el contrato del spec (firma del seam §2.1 + semántica §2.2 +
- * postcondiciones §2.3). Esta sesión (rol test-writer, aislamiento de fase, ADR-011)
- * NO leyó implementación: `src/extension/rules/rules.js` no existe aún y los call
- * sites del background quedan a review (§2.4). Los tests ejercitan el contrato
- * observable de los TRES exports del seam.
+ * Enmienda fb-026-001: la política de carga pasa de **fail-loud** a
+ * **warning + carga** (§2.3): overlap, token inválido, línea malformada, id
+ * duplicado y `**` conflictivo dejan de tumbar la config entera; el
+ * orden/first-match decide. La gramática admite globs `*`/`**` en host y path
+ * (§2.2). El matching NO se debilita: sólo cambia la expectativa de POLÍTICA
+ * (Q5 del HITL).
  *
- * ── Naturaleza RED esperada (requisito R-7) ─────────────────────────────────
- *  `rules.js` NO existe. Un `import` estático fallaría con ERR_MODULE_NOT_FOUND
- *  (throw) — eso NO es RED válido. Por eso el módulo se carga de forma
- *  CONTROLADA (patrón C-1 de frame/odoosh-proxy-doc.test.js): un `import()`
- *  dinámico cuyo rechazo se mapea a `rules = null`. CADA test empieza con
+ * Escrito SOLO contra el contrato del spec. Esta sesión (rol test-writer,
+ * aislamiento de fase, ADR-011) NO leyó implementación: `src/extension/rules/
+ * rules.js` no se leyó. Los tests ejercitan el contrato observable de los TRES
+ * exports del seam (`parseRules`/`matchDomain`/`resolveProfile`).
+ *
+ * ── Naturaleza RED esperada ─────────────────────────────────────────────────
+ *  El módulo se carga de forma CONTROLADA (patrón C-1): un `import()` dinámico
+ *  cuyo rechazo se mapea a `rules = null`. CADA test empieza con
  *  `assert.ok(rules, ...)`, así el fallo es AssertionError (no ImportError).
+ *  Los tests de POLÍTICA asertan `assert.equal(r.ok, true)` PRIMERO: hoy
+ *  `parseRules` devuelve `{ok:false, error}` SIN `warnings`/`profiles`, y
+ *  dereferenciar antes fallaría por TypeError (RED inválido).
  *
- * ── Oráculos discriminantes (deuda histórica R-8) ───────────────────────────
- *  P5/P8b/P9 pinean `ok:false` **y** la ausencia de perfiles (`profiles`
- *  undefined): no basta "no lanzó". La atomicidad (P9) es observable en el
- *  objeto retornado — el seam es puro, no muta estado global.
+ * ── Guards green-to-green (declarados, no RED) ──────────────────────────────
+ *  `fb027_P6`/`fb027_P7`/`fb027_P10` son postcondiciones de PRESERVACIÓN
+ *  (fb-026), no de cambio: pasan hoy y deben seguir pasando.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -51,7 +57,100 @@ function prof(id, token, domains) {
   return { id, bridgeUrl: B, token, domains };
 }
 
-// ── D1 — scoping host+path ──────────────────────────────────────────────────
+/** ¿Hay un warning con el `code` dado? (tolerante a `warnings` no-arreglo). */
+function hasCode(warnings, code) {
+  return Array.isArray(warnings) && warnings.some((w) => w && w.code === code);
+}
+
+/** Texto humano de un warning (message + detail) para asertar lo que "nombra". */
+function wtext(w) {
+  return `${(w && w.message) || ''} ${(w && w.detail) || ''}`;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// C2 — globs: matching (P1–P10; P6/P7/P10 son guards de preservación)
+// ════════════════════════════════════════════════════════════════════════════
+
+test('fb027_P1_star_cero_o_mas_no_cruza_slash', () => {
+  assert.ok(rules, AUSENTE);
+  // `*` matchea cero o más caracteres (que no son `/`): el label `cert` con y
+  // sin sufijo numérico.
+  assert.equal(
+    rules.matchDomain('https://edu-us-cert1.odoo.com/', 'edu-us-cert*.odoo.com'),
+    true,
+  );
+  assert.equal(
+    rules.matchDomain('https://edu-us-cert.odoo.com/', 'edu-us-cert*.odoo.com'),
+    true,
+  );
+});
+
+test('fb027_P2_star_cruza_punto_en_host', () => {
+  assert.ok(rules, AUSENTE);
+  // El glob estándar cruza `.` en el host (declarado).
+  assert.equal(
+    rules.matchDomain('https://edu-us-cert.x.odoo.com/', 'edu-us-cert*.odoo.com'),
+    true,
+  );
+});
+
+test('fb027_P3_star_no_cruza_slash', () => {
+  assert.ok(rules, AUSENTE);
+  // `*` no cruza `/`: consume el resto del segmento, no otro segmento.
+  assert.equal(rules.matchDomain('https://manjaro.org/products', 'manjaro.org/products*'), true);
+  assert.equal(
+    rules.matchDomain('https://manjaro.org/products-otro', 'manjaro.org/products*'),
+    true,
+  );
+  assert.equal(rules.matchDomain('https://manjaro.org/otro', 'manjaro.org/products*'), false);
+});
+
+test('fb027_P5_path_glob_es_superset_del_prefijo', () => {
+  assert.ok(rules, AUSENTE);
+  // Agregar `*` NUNCA angosta: el glob de path sigue cubriendo el subpath.
+  assert.equal(
+    rules.matchDomain('https://manjaro.org/products/x', 'manjaro.org/products*'),
+    true,
+  );
+});
+
+test('fb027_P6_forma_pura_subdominio_apice_y_profundidad', () => {
+  assert.ok(rules, AUSENTE);
+  // GUARD (preservación fb-026): `*.sufijo` matchea el ápice y cualquier profundidad.
+  assert.equal(rules.matchDomain('https://odoo.com/', '*.odoo.com'), true);
+  assert.equal(rules.matchDomain('https://a.odoo.com/', '*.odoo.com'), true);
+  assert.equal(rules.matchDomain('https://a.b.odoo.com/', '*.odoo.com'), true);
+});
+
+test('fb027_P7_doble_asterisco_catch_all', () => {
+  assert.ok(rules, AUSENTE);
+  // GUARD (preservación): `**` (token completo) es catch-all de cualquier URL http(s).
+  assert.equal(rules.matchDomain('https://cualquiera.example/a/b?q=1#f', '**'), true);
+});
+
+test('fb027_P8_star_en_medio_de_label', () => {
+  assert.ok(rules, AUSENTE);
+  // Un `*` en el medio de un label es aceptado (C2).
+  assert.equal(rules.matchDomain('https://eduXus.odoo.com/', 'edu*us.odoo.com'), true);
+});
+
+test('fb027_P9_doble_asterisco_en_path_globstar', () => {
+  assert.ok(rules, AUSENTE);
+  // `**` en el path es globstar: cualquier path (incluido el vacío/raíz).
+  assert.equal(rules.matchDomain('https://example.com/', 'example.com/**'), true);
+  assert.equal(rules.matchDomain('https://example.com/a', 'example.com/**'), true);
+  assert.equal(rules.matchDomain('https://example.com/a/b', 'example.com/**'), true);
+});
+
+test('fb027_P10_path_case_sensitive', () => {
+  assert.ok(rules, AUSENTE);
+  // GUARD (preservación): el path es case-sensitive.
+  assert.equal(rules.matchDomain('https://example.com/Products', 'example.com/products'), false);
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// D1 — scoping host+path (fb-026; PRESERVADOS, no se tocan)
+// ════════════════════════════════════════════════════════════════════════════
 
 test('P1_host_sin_path_matchea_cualquier_path', () => {
   assert.ok(rules, AUSENTE);
@@ -93,22 +192,38 @@ test('P4_dos_perfiles_mismo_host_paths_disjuntos', () => {
   assert.equal(rules.resolveProfile('https://example.com/project/b/x', [profA, profB]), profB);
 });
 
-// ── D2 — fail-loud en la carga de perfiles ──────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+// D2/C1 — política de carga: OVERLAP → warning + first-match (§2.3)
+// ════════════════════════════════════════════════════════════════════════════
 
 test('P5a_solape_mismo_host_path', () => {
   assert.ok(rules, AUSENTE);
   const text = `${B} ${TOKEN_A} example.com/project\n${B} ${TOKEN_B} example.com/project\n`;
   const r = rules.parseRules(text);
-  assert.equal(r.ok, false, 'P5a: dos perfiles con el mismo host/path deben fallar visible');
-  assert.equal(r.profiles, undefined, 'P5a (atomicidad R-8): cero perfiles del texto rechazado');
+  assert.equal(r.ok, true, 'P5a: el overlap ya NO tumba la carga (warning + carga)');
+  assert.equal(r.profiles.length, 2, 'P5a: ambos perfiles solapados quedan cargados');
+  const ov = (r.warnings || []).find((w) => w && w.code === 'overlap');
+  assert.ok(ov, 'P5a: se emite un warning `overlap`');
+  const t = wtext(ov);
+  assert.ok(t.includes(ID_A), 'P5a: el warning nombra el perfil A');
+  assert.ok(t.includes(ID_B), 'P5a: el warning nombra el perfil B');
+  assert.ok(
+    /first|primero|gana|ganador|winner|prevalece|prioridad/i.test(t),
+    'P5a: el warning nombra cuál gana por first-match (el anterior)',
+  );
 });
 
 test('P5b_solape_host_sin_path', () => {
   assert.ok(rules, AUSENTE);
   const text = `${B} ${TOKEN_A} example.com\n${B} ${TOKEN_B} example.com/project\n`;
   const r = rules.parseRules(text);
-  assert.equal(r.ok, false, 'P5b: host sin path solapa con host/prefijo ⇒ falla visible');
-  assert.equal(r.profiles, undefined, 'P5b (atomicidad R-8): cero perfiles del texto rechazado');
+  assert.equal(r.ok, true, 'P5b: host sin path solapa con host/prefijo ⇒ carga con warning');
+  assert.equal(r.profiles.length, 2, 'P5b: ambos perfiles quedan cargados');
+  const ov = (r.warnings || []).find((w) => w && w.code === 'overlap');
+  assert.ok(ov, 'P5b: se emite un warning `overlap`');
+  const t = wtext(ov);
+  assert.ok(t.includes(ID_A), 'P5b: el warning nombra el perfil A (ganador)');
+  assert.ok(t.includes(ID_B), 'P5b: el warning nombra el perfil B');
 });
 
 test('P5c_solape_wildcard_vs_host_y_prefijos_anidados', () => {
@@ -116,24 +231,32 @@ test('P5c_solape_wildcard_vs_host_y_prefijos_anidados', () => {
   // (i) comodín de subdominio (más ápice) vs host exacto del sufijo.
   const tWild = `${B} ${TOKEN_A} *.example.com\n${B} ${TOKEN_B} example.com\n`;
   const rWild = rules.parseRules(tWild);
-  assert.equal(rWild.ok, false, 'P5c: *.sufijo solapa con el ápice ⇒ falla visible');
-  assert.equal(rWild.profiles, undefined, 'P5c (atomicidad R-8): cero perfiles del texto rechazado');
+  assert.equal(rWild.ok, true, 'P5c: *.sufijo solapa con el ápice ⇒ carga con warning');
+  assert.equal(rWild.profiles.length, 2, 'P5c(i): ambos perfiles cargan');
+  assert.ok(hasCode(rWild.warnings, 'overlap'), 'P5c(i): warning overlap');
   // (ii) prefijos anidados.
   const tNested = `${B} ${TOKEN_A} example.com/project\n${B} ${TOKEN_B} example.com/project/sub\n`;
   const rNested = rules.parseRules(tNested);
-  assert.equal(rNested.ok, false, 'P5c: prefijos anidados solapan ⇒ falla visible');
-  assert.equal(
-    rNested.profiles,
-    undefined,
-    'P5c (atomicidad R-8): cero perfiles del texto rechazado',
-  );
+  assert.equal(rNested.ok, true, 'P5c: prefijos anidados solapan ⇒ carga con warning');
+  assert.equal(rNested.profiles.length, 2, 'P5c(ii): ambos perfiles cargan');
+  assert.ok(hasCode(rNested.warnings, 'overlap'), 'P5c(ii): warning overlap');
 });
 
-test('P6_asterisco_pelado_rechazado', () => {
+// ════════════════════════════════════════════════════════════════════════════
+// D6/C1 — `*` pelado: inválido pero NO bloquea (warning) (§2.3)
+// ════════════════════════════════════════════════════════════════════════════
+
+test('P6_asterisco_pelado_invalido_con_warning', () => {
   assert.ok(rules, AUSENTE);
   const r = rules.parseRules(`${B} ${TOKEN_A} *\n`);
-  assert.equal(r.ok, false, 'P6: un * pelado debe fallar visible');
-  assert.equal(typeof r.error, 'string', 'P6: el rechazo lleva un error');
+  assert.equal(r.ok, true, 'P6: un * pelado ya NO tumba la carga');
+  assert.ok(Array.isArray(r.profiles), 'P6: profiles es un arreglo');
+  assert.equal(r.profiles.length, 0, 'P6: la línea queda sin dominios ⇒ se saltea');
+  assert.ok(hasCode(r.warnings, 'invalid_domain'), 'P6: warning invalid_domain del * pelado');
+  assert.ok(
+    hasCode(r.warnings, 'invalid_line'),
+    'P6: la línea queda con 0 dominios ⇒ warning invalid_line',
+  );
 });
 
 test('P7_sentinel_star_none', () => {
@@ -152,25 +275,34 @@ test('P8a_un_doble_asterisco_aceptado_exento', () => {
   assert.equal(r.profiles.length, 2, 'P8a: el perfil ** queda exento del chequeo de solapamiento');
 });
 
-test('P8b_dos_doble_asterisco_rechazado', () => {
+// ════════════════════════════════════════════════════════════════════════════
+// D5/C1 — `**` conflictivo: sólo el primero es catch-all (§2.3)
+// ════════════════════════════════════════════════════════════════════════════
+
+test('P8b_dos_doble_asterisco_solo_el_primero', () => {
   assert.ok(rules, AUSENTE);
   const text = `${B} ${TOKEN_A} **\n${B} ${TOKEN_B} **\n`;
   const r = rules.parseRules(text);
-  assert.equal(r.ok, false, 'P8b: a lo sumo un ** por config; dos ⇒ falla visible');
-  assert.equal(r.profiles, undefined, 'P8b (atomicidad R-8): cero perfiles del texto rechazado');
+  assert.equal(r.ok, true, 'P8b: el segundo ** ya NO tumba la carga');
+  assert.equal(r.profiles.length, 1, 'P8b: sólo el primer ** es catch-all');
+  assert.equal(r.profiles[0].id, ID_A, 'P8b: sobrevive el primer perfil');
+  assert.ok(hasCode(r.warnings, 'catch_all_conflict'), 'P8b: warning catch_all_conflict');
 });
 
-test('P9_atomicidad_texto_invalido', () => {
+// ════════════════════════════════════════════════════════════════════════════
+// C1 — atomicidad RETIRADA: el resto de la config carga (§2.3 / P20)
+// ════════════════════════════════════════════════════════════════════════════
+
+test('P9_atomicidad_retirada_linea_valida_carga', () => {
   assert.ok(rules, AUSENTE);
-  // Una línea válida + una inválida (* pelado): no debe haber aplicación parcial.
+  // Una línea válida + una inválida (* pelado): ya NO hay todo-o-nada; la
+  // línea válida carga y la inválida se saltea con warning.
   const text = `${B} ${TOKEN_A} example.com/project\n${B} ${TOKEN_B} *\n`;
   const r = rules.parseRules(text);
-  assert.equal(r.ok, false, 'P9: el texto inválido falla completo');
-  assert.equal(
-    r.profiles,
-    undefined,
-    'P9: ningún perfil del texto inválido se registra (sin aplicación parcial)',
-  );
+  assert.equal(r.ok, true, 'P9: la línea inválida ya no aborta el texto (atomicidad retirada)');
+  assert.equal(r.profiles.length, 1, 'P9: la línea válida carga');
+  assert.equal(r.profiles[0].id, ID_A, 'P9: sólo el perfil válido carga');
+  assert.ok(hasCode(r.warnings, 'invalid_domain'), 'P9: warning de la línea del * pelado');
 });
 
 test('P10_texto_valido_inequivoco_y_orden', () => {
@@ -195,15 +327,23 @@ test('P10_texto_valido_inequivoco_y_orden', () => {
   );
 });
 
-test('P11_error_observable_en_el_seam', () => {
+// ════════════════════════════════════════════════════════════════════════════
+// C1 — el problema se reporta como WARNING (no se traga) (§2.1/§2.3)
+// ════════════════════════════════════════════════════════════════════════════
+
+test('P11_warnings_observables_en_el_seam', () => {
   assert.ok(rules, AUSENTE);
   const r = rules.parseRules(`${B} ${TOKEN_A} *\n`);
-  assert.equal(r.ok, false, 'P11: texto inválido ⇒ ok:false');
-  assert.equal(typeof r.error, 'string', 'P11: el error se produce y se retorna (no se traga)');
-  assert.ok(r.error.length > 0, 'P11: el error es un string no vacío');
+  assert.equal(r.ok, true, 'P11: el seam ya no produce ok:false por validación');
+  assert.equal(r.error, undefined, 'P11: el campo `error` ya no existe en la validación');
+  assert.ok(Array.isArray(r.warnings), 'P11: warnings es un arreglo');
+  assert.ok(r.warnings.length > 0, 'P11: el problema se reporta (no se traga)');
+  assert.ok(hasCode(r.warnings, 'invalid_domain'), 'P11: el warning nombra la causa');
 });
 
-// ── D3 — consistencia asignación ↔ guard (vía el seam, spec §2.4) ───────────
+// ════════════════════════════════════════════════════════════════════════════
+// D3 — consistencia asignación ↔ guard (vía el seam; PRESERVADOS)
+// ════════════════════════════════════════════════════════════════════════════
 
 test('P12a_destino_en_scope_permitido', () => {
   assert.ok(rules, AUSENTE);
@@ -238,40 +378,140 @@ test('P13_listtabs_excluye_fuera_de_scope', () => {
   assert.equal(rules.resolveProfile(fuera, [profA]), null, 'P13: fuera de scope ⇒ no listada');
 });
 
-// ── D2 — fail-loud de líneas malformadas (Enmienda 2 / P15, spec §2.7) ───────
-// Una línea que NO es comentario (#), NO es vacía/whitespace, NO es el sentinel
-// `* None`, y NO es un perfil válido de ≥3 partes (bridgeUrl http(s) válida,
-// token no vacío, ≥1 token de dominio) hace FALLAR VISIBLE la carga:
-// `{ok:false, error}` y CERO perfiles del texto (atomicidad, P9). No hay
-// descarte silencioso de líneas malformadas.
+// ════════════════════════════════════════════════════════════════════════════
+// C1 — FIRST-MATCH sobre overlap parseado (P12) (§2.2/§2.3)
+// ════════════════════════════════════════════════════════════════════════════
 
-test('P15a_linea_corta_no_sentinel_fail_loud', () => {
+test('fb027_P12_overlap_resuelve_first_match', () => {
+  assert.ok(rules, AUSENTE);
+  // Dos perfiles solapados: `example.com/project` (A) y `example.com` (B). La URL
+  // `/project/x` la reclaman ambos ⇒ gana el primero del arreglo (first-match).
+  const text = `${B} ${TOKEN_A} example.com/project\n${B} ${TOKEN_B} example.com\n`;
+  const r = rules.parseRules(text);
+  assert.equal(r.ok, true, 'P12: la config con overlap carga');
+  assert.ok(Array.isArray(r.profiles), 'P12: profiles es un arreglo');
+  assert.equal(r.profiles.length, 2, 'P12: ambos perfiles cargan');
+  assert.equal(r.profiles[0].id, ID_A, 'P12: el orden de la config se preserva');
+  const url = 'https://example.com/project/x';
+  assert.equal(
+    rules.resolveProfile(url, r.profiles),
+    r.profiles[0],
+    'P12: gana el primero declarado (first-match)',
+  );
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// D3 — token inválido: skip del TOKEN; línea sin dominios: skip de la LÍNEA
+// ════════════════════════════════════════════════════════════════════════════
+
+test('fb027_P13_token_invalido_se_saltea_y_linea_carga', () => {
+  assert.ok(rules, AUSENTE);
+  // `*` pelado entre dominios válidos: se saltea SÓLO el token; la línea conserva
+  // sus otros dominios.
+  const r = rules.parseRules(`${B} ${TOKEN_A} example.com *\n`);
+  assert.equal(r.ok, true, 'P13: el token inválido no tumba la carga');
+  assert.equal(r.profiles.length, 1, 'P13: la línea carga con sus otros dominios');
+  assert.deepEqual(r.profiles[0].domains, ['example.com'], 'P13: se saltea sólo el token inválido');
+  assert.ok(hasCode(r.warnings, 'invalid_domain'), 'P13: warning invalid_domain');
+});
+
+test('fb027_P14_linea_sin_dominios_se_saltea', () => {
+  assert.ok(rules, AUSENTE);
+  // Línea 1: token `*` inválido ⇒ queda con 0 dominios ⇒ se saltea la línea.
+  // Línea 2: válida ⇒ carga. El resto de la config carga.
+  const text = `${B} ${TOKEN_A} *\n${B} ${TOKEN_B} example.com\n`;
+  const r = rules.parseRules(text);
+  assert.equal(r.ok, true, 'P14: la línea sin dominios no tumba el resto');
+  assert.equal(r.profiles.length, 1, 'P14: sólo la línea válida carga');
+  assert.equal(r.profiles[0].id, ID_B, 'P14: el resto de la config carga');
+  assert.ok(hasCode(r.warnings, 'invalid_line'), 'P14: warning invalid_line de la línea salteada');
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// D6 — host sin alfanumérico (`*`, `*.*`): inválido, fail-closed (P21)
+// ════════════════════════════════════════════════════════════════════════════
+
+test('fb027_P21_host_solo_asterisco_punto_invalido', () => {
+  assert.ok(rules, AUSENTE);
+  const r = rules.parseRules(`${B} ${TOKEN_A} *.*\n`);
+  assert.equal(r.ok, true, 'P21: el host sin alfanumérico no tumba la carga');
+  assert.equal(r.profiles.length, 0, 'P21: el token se descarta (fail-closed)');
+  assert.ok(hasCode(r.warnings, 'invalid_domain'), 'P21: warning invalid_domain');
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// D7 — host glob "ancho": aviso `broad_glob`, la carga honra el patrón (P22)
+// ════════════════════════════════════════════════════════════════════════════
+
+test('fb027_P22_broad_glob_warning_pero_carga', () => {
+  assert.ok(rules, AUSENTE);
+  for (const patron of ['*cert*.odoo.com', '*foo.com', '*.dev.odoo.com*.vauxoo.com']) {
+    const r = rules.parseRules(`${B} ${TOKEN_A} ${patron}\n`);
+    assert.equal(r.ok, true, `P22: ${patron} no bloquea la carga`);
+    assert.equal(r.profiles.length, 1, `P22: ${patron} carga tal cual`);
+    assert.deepEqual(r.profiles[0].domains, [patron], `P22: ${patron} se honra como dominio`);
+    assert.ok(hasCode(r.warnings, 'broad_glob'), `P22: ${patron} dispara broad_glob (aviso)`);
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// C1/P20 — parseRules siempre ok:true; warnings por line; profiles en orden
+// ════════════════════════════════════════════════════════════════════════════
+
+test('fb027_P20_siempre_ok_warnings_ordenados_profiles_ordenados', () => {
+  assert.ok(rules, AUSENTE);
+  // Anomalías en líneas desordenadas respecto del orden de emisión esperado.
+  const text =
+    `${B} ${TOKEN_A} *\n` + //          línea 1: invalid_domain (+ invalid_line)
+    `${B} ${TOKEN_A} example.com\n` + // línea 2: perfil A (carga)
+    `${B} ${TOKEN_B} example.net\n` + // línea 3: perfil B (carga)
+    `${B} ${TOKEN_B} example.org\n`; //  línea 4: duplicate_id (first-wins)
+  const r = rules.parseRules(text);
+  assert.equal(r.ok, true, 'P20: parseRules(string) siempre devuelve ok:true');
+  assert.ok(Array.isArray(r.profiles), 'P20: profiles es un arreglo');
+  assert.ok(Array.isArray(r.warnings), 'P20: warnings es un arreglo');
+  assert.equal(r.profiles.length, 2, 'P20: dos perfiles cargan (la línea duplicada se ignora)');
+  assert.equal(r.profiles[0].id, ID_A, 'P20: profiles preserva el orden de la config');
+  assert.equal(r.profiles[1].id, ID_B, 'P20: profiles preserva el orden de la config');
+  const lines = r.warnings.map((w) => w.line);
+  assert.deepEqual(
+    lines,
+    [...lines].sort((a, b) => a - b),
+    'P20: warnings ordenado por `line`',
+  );
+  assert.ok(
+    r.warnings.some((w) => w.line === 1 && w.code === 'invalid_domain'),
+    'P20: warning de la línea 1 (invalid_domain)',
+  );
+  assert.ok(
+    r.warnings.some((w) => w.line === 4 && w.code === 'duplicate_id'),
+    'P20: warning de la línea 4 (duplicate_id)',
+  );
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// D2/C1 — líneas malformadas: se SALTEAN con warning (P15; ya no fail-loud)
+// ════════════════════════════════════════════════════════════════════════════
+
+test('P15a_linea_corta_no_sentinel_se_saltea_con_warning', () => {
   assert.ok(rules, AUSENTE);
   const VALIDA = `${B} ${TOKEN_A} example.com/project\n`;
-  // (control) la línea válida por sí sola carga: así el "no registrada" del
-  // texto combinado es discriminante (todo-o-nada), no un falso positivo.
+  // (control) la línea válida por sí sola carga: así el "carga el resto" del
+  // texto combinado es discriminante, no un falso positivo.
   const control = rules.parseRules(VALIDA);
   assert.equal(control.ok, true, 'P15a control: la línea válida por sí sola carga');
   assert.equal(control.profiles.length, 1, 'P15a control: un solo perfil');
 
   // Línea de 2 partes que NO es el sentinel `* None` (aquí `https://b T`):
-  // no es comentario, no es vacía, no es sentinel ni un perfil de ≥3 partes.
+  // se saltea la línea con warning; la línea válida del mismo texto carga.
   const r = rules.parseRules(`https://b T\n${VALIDA}`);
-  assert.equal(
-    r.ok,
-    false,
-    'P15a: línea de <3 partes no-sentinel ⇒ la carga debe fallar visible (fail-loud)',
-  );
-  assert.equal(typeof r.error, 'string', 'P15a: el rechazo lleva un error');
-  assert.ok(r.error.length > 0, 'P15a: el error es un string no vacío');
-  assert.equal(
-    r.profiles,
-    undefined,
-    'P15a (atomicidad R-8, todo-o-nada): ni la línea válida del mismo texto se registra',
-  );
+  assert.equal(r.ok, true, 'P15a: la línea malformada ya no tumba la carga (warning)');
+  assert.equal(r.profiles.length, 1, 'P15a: el resto de la config carga');
+  assert.equal(r.profiles[0].id, ID_A, 'P15a: sólo la línea válida carga');
+  assert.ok(hasCode(r.warnings, 'invalid_line'), 'P15a: warning invalid_line de la línea salteada');
 });
 
-test('P15b_bridgeurl_invalida_fail_loud', () => {
+test('P15b_bridgeurl_invalida_se_saltea_con_warning', () => {
   assert.ok(rules, AUSENTE);
   const VALIDA = `${B} ${TOKEN_A} example.com/project\n`;
   const control = rules.parseRules(VALIDA);
@@ -280,59 +520,52 @@ test('P15b_bridgeurl_invalida_fail_loud', () => {
 
   // 3 partes, token no vacío, ≥1 token de dominio — pero bridgeUrl NO es http(s)
   // válida. El dominio del perfil malformado (example.org) es distinto del de la
-  // línea válida (example.com), para que el fallo solo pueda provenir de P15 y no
-  // de un solape entre perfiles.
+  // línea válida (example.com), para que el warning solo pueda provenir de P15.
   const r = rules.parseRules(`notaurl T example.org\n${VALIDA}`);
-  assert.equal(
-    r.ok,
-    false,
-    'P15b: bridgeUrl inválida (no http(s)) ⇒ la carga debe fallar visible (fail-loud)',
-  );
-  assert.equal(typeof r.error, 'string', 'P15b: el rechazo lleva un error');
-  assert.ok(r.error.length > 0, 'P15b: el error es un string no vacío');
-  assert.equal(
-    r.profiles,
-    undefined,
-    'P15b (atomicidad R-8, todo-o-nada): ni la línea válida del mismo texto se registra',
-  );
+  assert.equal(r.ok, true, 'P15b: bridgeUrl inválida ya no tumba la carga (warning)');
+  assert.equal(r.profiles.length, 1, 'P15b: el resto de la config carga');
+  assert.equal(r.profiles[0].id, ID_A, 'P15b: sólo la línea válida carga');
+  assert.ok(hasCode(r.warnings, 'invalid_line'), 'P15b: warning invalid_line de la línea salteada');
 });
 
-// ── D2 — composición de perfiles y forma del token (Enmienda 3 / P16–P18) ───
-// spec §2.8: (P16) un perfil es catch-all SOLO si `**` es su único token de
-// dominio; (P17) dos líneas con el mismo (bridgeUrl, token) ⇒ id duplicado
-// fail-loud, sin fusión silenciosa; (P18) el token de dominio debe ser un host
-// válido (host o `*.suffix` con path opcional), comparado case-insensitive.
-// Todo error ⇒ `{ok:false, error}` no vacío y CERO perfiles (atomicidad R-8).
+// ════════════════════════════════════════════════════════════════════════════
+// D5 — `**` mezclado con scope: se IGNORA el `**` (no amplía) (P17)
+// ════════════════════════════════════════════════════════════════════════════
 
-test('P16a_catch_all_mezclado_en_misma_linea_fail_loud', () => {
+test('P16a_catch_all_mezclado_en_misma_linea_ignorado', () => {
   assert.ok(rules, AUSENTE);
   // Un mismo perfil con `**` + un token con scope (misma línea) NO es un
-  // catch-all puro: el operador nunca aprobó esa amplitud ⇒ fail-loud.
+  // catch-all puro: se ignora el `**` y el perfil conserva su scope.
   const r = rules.parseRules(`${B} ${TOKEN_A} ** example.com/own\n`);
-  assert.equal(
-    r.ok,
-    false,
-    'P16a: `**` mezclado con un dominio con scope en la misma línea ⇒ falla visible',
+  assert.equal(r.ok, true, 'P16a: `**` mezclado ya no tumba la carga');
+  assert.equal(r.profiles.length, 1, 'P16a: el perfil carga (sin el `**`)');
+  assert.deepEqual(
+    r.profiles[0].domains,
+    ['example.com/own'],
+    'P16a: se ignora el `**`, se conserva el scope (NO catch-all)',
   );
-  assert.equal(typeof r.error, 'string', 'P16a: el rechazo lleva un error');
-  assert.ok(r.error.length > 0, 'P16a: el error es un string no vacío');
-  assert.equal(r.profiles, undefined, 'P16a (atomicidad R-8): cero perfiles del texto rechazado');
+  assert.ok(hasCode(r.warnings, 'catch_all_conflict'), 'P16a: warning catch_all_conflict');
 });
 
-test('P16b_catch_all_por_fusion_de_lineas_fail_loud', () => {
+// ════════════════════════════════════════════════════════════════════════════
+// D4 — id duplicado `(bridgeUrl, token)`: first-wins + warning (P16)
+// ════════════════════════════════════════════════════════════════════════════
+
+test('P16b_id_duplicado_scoped_primero_catch_all_ignorado', () => {
   assert.ok(rules, AUSENTE);
-  // Dos líneas del MISMO (bridgeUrl, token): una con scope y otra `**`. La
-  // fusión (unión) convertiría el perfil en catch-all silencioso ⇒ fail-loud.
+  // ORDEN CRÍTICO (audit §2): scoped-primero, `**`-después. El id duplicado hace
+  // first-wins ⇒ la línea del `**` se descarta ANTES de poder ser catch-all:
+  // el warning es `duplicate_id` (D4), NO `catch_all_conflict` (D5).
   const text = `${B} ${TOKEN_A} example.com/own\n${B} ${TOKEN_A} **\n`;
   const r = rules.parseRules(text);
-  assert.equal(
-    r.ok,
-    false,
-    'P16b: `**` fusionado con un dominio con scope en el mismo id ⇒ falla visible',
+  assert.equal(r.ok, true, 'P16b: la fusión por id duplicado ya no tumba la carga');
+  assert.equal(r.profiles.length, 1, 'P16b: sólo el perfil scoped sobrevive (first-wins)');
+  assert.deepEqual(r.profiles[0].domains, ['example.com/own'], 'P16b: NO es catch-all');
+  assert.ok(hasCode(r.warnings, 'duplicate_id'), 'P16b: warning duplicate_id (first-wins)');
+  assert.ok(
+    !hasCode(r.warnings, 'catch_all_conflict'),
+    'P16b: NO es catch_all_conflict (matiz D4: el duplicado actúa antes)',
   );
-  assert.equal(typeof r.error, 'string', 'P16b: el rechazo lleva un error');
-  assert.ok(r.error.length > 0, 'P16b: el error es un string no vacío');
-  assert.equal(r.profiles, undefined, 'P16b (atomicidad R-8): cero perfiles del texto rechazado');
 });
 
 test('P16c_catch_all_exclusivo_control_positivo', () => {
@@ -346,20 +579,20 @@ test('P16c_catch_all_exclusivo_control_positivo', () => {
   assert.equal(r.profiles.length, 2, 'P16c: ambos perfiles cargan');
 });
 
-test('P17_id_duplicado_fail_loud', () => {
+test('P17_id_duplicado_first_wins', () => {
   assert.ok(rules, AUSENTE);
-  // Control positivo inline (patrón P15a): cada línea por separado carga, así el
-  // "no registrada" del texto combinado es discriminante (todo-o-nada).
+  // Control positivo inline: la línea del mismo id por sí sola carga.
   const soloA = rules.parseRules(`${B} ${TOKEN_A} example.com/a\n`);
   assert.equal(soloA.ok, true, 'P17 control: la línea del mismo id por sí sola carga');
-  // Dos líneas con el MISMO (bridgeUrl, token) ⇒ id duplicado. No hay fusión
-  // silenciosa (unión) ni last-wins silencioso ⇒ fail-loud.
+  // Dos líneas con el MISMO (bridgeUrl, token): first-wins ⇒ se ignora la
+  // línea posterior (no hay fusión ni last-wins silencioso).
   const text = `${B} ${TOKEN_A} example.com/a\n${B} ${TOKEN_A} example.com/b\n`;
   const r = rules.parseRules(text);
-  assert.equal(r.ok, false, 'P17: id (bridgeUrl|token) duplicado ⇒ falla visible');
-  assert.equal(typeof r.error, 'string', 'P17: el rechazo lleva un error');
-  assert.ok(r.error.length > 0, 'P17: el error es un string no vacío');
-  assert.equal(r.profiles, undefined, 'P17 (atomicidad R-8): cero perfiles del texto rechazado');
+  assert.equal(r.ok, true, 'P17: el id duplicado ya no tumba la carga');
+  assert.equal(r.profiles.length, 1, 'P17: first-wins ⇒ un solo perfil');
+  assert.equal(r.profiles[0].id, ID_A, 'P17: sobrevive la primera línea');
+  assert.deepEqual(r.profiles[0].domains, ['example.com/a'], 'P17: se ignora la línea posterior');
+  assert.ok(hasCode(r.warnings, 'duplicate_id'), 'P17: warning duplicate_id');
   // Control positivo: distinto token ⇒ distinto id ⇒ carga.
   const distintos = rules.parseRules(
     `${B} ${TOKEN_A} example.com/a\n${B} ${TOKEN_B} example.com/b\n`,
@@ -368,26 +601,29 @@ test('P17_id_duplicado_fail_loud', () => {
   assert.equal(distintos.profiles.length, 2, 'P17 control: dos perfiles');
 });
 
-test('P18a_token_con_esquema_fail_loud', () => {
+// ════════════════════════════════════════════════════════════════════════════
+// D3/C2 — token de dominio: `://` inválido (skip) vs `*` en host = glob válido
+// ════════════════════════════════════════════════════════════════════════════
+
+test('P18a_token_con_esquema_salteado_con_warning', () => {
   assert.ok(rules, AUSENTE);
-  // Un token de dominio con `://` (una URL pegada como dominio) no es un host
-  // válido: el perfil no reclamaría ninguna URL ⇒ fail-loud, no perfil muerto.
+  // Un token de dominio con `://` (una URL pegada como dominio) no es un host:
+  // se saltea el token; la línea queda con 0 dominios ⇒ se saltea con warning.
   const r = rules.parseRules(`${B} ${TOKEN_A} https://example.com/roadmap\n`);
-  assert.equal(r.ok, false, 'P18a: token de dominio con `://` ⇒ falla visible');
-  assert.equal(typeof r.error, 'string', 'P18a: el rechazo lleva un error');
-  assert.ok(r.error.length > 0, 'P18a: el error es un string no vacío');
-  assert.equal(r.profiles, undefined, 'P18a (atomicidad R-8): cero perfiles del texto rechazado');
+  assert.equal(r.ok, true, 'P18a: el token con `://` ya no tumba la carga');
+  assert.equal(r.profiles.length, 0, 'P18a: el token se descarta; la línea queda sin dominios');
+  assert.ok(hasCode(r.warnings, 'invalid_domain'), 'P18a: warning invalid_domain');
+  assert.ok(hasCode(r.warnings, 'invalid_line'), 'P18a: warning invalid_line (línea sin dominios)');
 });
 
-test('P18b_token_con_asterisco_invalido_fail_loud', () => {
+test('P18b_token_con_asterisco_es_glob_valido', () => {
   assert.ok(rules, AUSENTE);
-  // Un `*` que no es el catch-all `**` ni el comodín `*.` al inicio es un token
-  // imposible (el comodín de subdominio solo vale como `*.` al inicio).
+  // C2: un `*` en el medio de un label de host es un glob válido (ya no inválido).
   const r = rules.parseRules(`${B} ${TOKEN_A} exa*mple.com\n`);
-  assert.equal(r.ok, false, 'P18b: `*` fuera de `**`/`*.` ⇒ falla visible');
-  assert.equal(typeof r.error, 'string', 'P18b: el rechazo lleva un error');
-  assert.ok(r.error.length > 0, 'P18b: el error es un string no vacío');
-  assert.equal(r.profiles, undefined, 'P18b (atomicidad R-8): cero perfiles del texto rechazado');
+  assert.equal(r.ok, true, 'P18b: `*` en el host ya no es inválido (C2: glob válido)');
+  assert.equal(r.profiles.length, 1, 'P18b: el perfil carga');
+  assert.deepEqual(r.profiles[0].domains, ['exa*mple.com'], 'P18b: el glob se conserva');
+  assert.equal(r.error, undefined, 'P18b: sin error');
 });
 
 test('P18c_host_case_insensitive', () => {
@@ -403,32 +639,24 @@ test('P18c_host_case_insensitive', () => {
   );
 });
 
-test('P18d_asterisco_en_path_fail_loud', () => {
+// ════════════════════════════════════════════════════════════════════════════
+// D6/C2 — `*` en el PATH es glob válido (enmienda P18d; ya no fail-loud)
+// ════════════════════════════════════════════════════════════════════════════
+
+test('P18d_asterisco_en_path_es_glob_valido', () => {
   assert.ok(rules, AUSENTE);
-  // Control discriminante: un path VÁLIDO sin `*` carga (así el fallo del texto
-  // con `*` en el path solo puede provenir de la forma del token de dominio, no
-  // de otra regla ni de un bridgeUrl inválido).
+  // Control discriminante: un path VÁLIDO sin `*` carga (así el cambio del texto
+  // con `*` en el path solo puede provenir de la nueva gramática de glob).
   const control = rules.parseRules(`${B} ${TOKEN_A} example.com/project\n`);
   assert.equal(control.ok, true, 'P18d control: un path válido sin `*` carga');
   assert.equal(control.profiles.length, 1, 'P18d control: un solo perfil');
 
-  // Un `*` en la PORCIÓN DE PATH del token de dominio (`example.com/**` o
-  // `example.com/*`) NO es un host válido: el catch-all es el token `**` (sin
-  // host) y el comodín de subdominio solo vale como `*.` al inicio del host.
-  // Hoy se acepta como literal de path (perfil muerto) ⇒ debe fallar visible.
+  // C2: un `*` en la PORCIÓN DE PATH del token es un glob válido (`example.com/**`
+  // globstar, `example.com/*` glob de segmento); el perfil carga.
   for (const dominio of ['example.com/**', 'example.com/*']) {
     const r = rules.parseRules(`${B} ${TOKEN_A} ${dominio}\n`);
-    assert.equal(
-      r.ok,
-      false,
-      `P18d: un \`*\` en el path del token (${dominio}) ⇒ la carga debe fallar visible`,
-    );
-    assert.equal(typeof r.error, 'string', `P18d: el rechazo lleva un error (${dominio})`);
-    assert.ok(r.error.length > 0, `P18d: el error es un string no vacío (${dominio})`);
-    assert.equal(
-      r.profiles,
-      undefined,
-      `P18d (atomicidad R-8): cero perfiles del texto rechazado (${dominio})`,
-    );
+    assert.equal(r.ok, true, `P18d: el \`*\` en el path (${dominio}) es un glob válido`);
+    assert.equal(r.profiles.length, 1, `P18d: el perfil carga (${dominio})`);
+    assert.deepEqual(r.profiles[0].domains, [dominio], `P18d: el glob de path se conserva (${dominio})`);
   }
 });
