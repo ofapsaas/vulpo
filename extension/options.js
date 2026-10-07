@@ -46,8 +46,9 @@ function showStatus(msg, type) {
 }
 
 // Validación — consume el MISMO seam que el background (VulpoRules.parseRules,
-// fb-026-001 §2.6): una sola noción de "config válida". Fail-loud si el bundle
-// no está cargado (options.html lo carga antes que este script).
+// fb-026-001 §2.6): una sola noción de "config válida". El seam ya no falla por
+// validación (fb-027-001 §2.3): siempre `{ok:true, profiles, warnings}`; el
+// único `ok:false` vivo es infraestructura (bundle ausente).
 function validateText(text) {
   const rules = globalThis.VulpoRules;
   if (!rules || typeof rules.parseRules !== 'function') {
@@ -56,11 +57,18 @@ function validateText(text) {
   return rules.parseRules(text);
 }
 
+// fb-027-001 (P23): los warnings se muestran, no bloquean la carga.
+function formatWarnings(warnings) {
+  return warnings.map((w) => `⚠️ L${w.line}: ${w.message}`).join('\n');
+}
+
 // Save rules
 async function saveRules() {
   const text = rulesInput.value.trim() || DEFAULT_RULES;
 
-  // Fail-loud: no se guarda una config inválida (solapamiento, `*` pelado, dos `**`).
+  // fb-027-001 (P23): la config SIEMPRE se guarda si el seam está disponible
+  // (`ok`), aun con warnings (overlap/token inválido/glob ancho). Sólo un fallo
+  // de infraestructura (bundle ausente) bloquea.
   const result = validateText(text);
   if (!result.ok) {
     showStatus(`⚠️ ${result.error}`, 'error');
@@ -85,7 +93,12 @@ async function saveRules() {
       // Background might not be running, still saved
     }
 
-    showStatus('✅ Perfiles guardados. La extensión se reconectará automáticamente.', 'success');
+    const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+    if (warnings.length > 0) {
+      showStatus(`⚠️ Perfiles guardados con avisos:\n${formatWarnings(warnings)}`, 'warning');
+    } else {
+      showStatus('✅ Perfiles guardados. La extensión se reconectará automáticamente.', 'success');
+    }
   } catch (err) {
     showStatus(`❌ Error al guardar: ${err.message}`, 'error');
   }
@@ -105,9 +118,17 @@ rulesInput.addEventListener('keydown', (e) => {
   }
 });
 
-// Live validation
+// Live validation (fb-027-001 P23): rojo SÓLO por infraestructura (bundle
+// ausente); los warnings se reflejan en amarillo y NO bloquean el guardado.
 rulesInput.addEventListener('input', () => {
-  rulesInput.style.borderColor = validateText(rulesInput.value).ok ? '' : 'var(--danger)';
+  const result = validateText(rulesInput.value);
+  if (!result.ok) {
+    rulesInput.style.borderColor = 'var(--danger)';
+  } else if (Array.isArray(result.warnings) && result.warnings.length > 0) {
+    rulesInput.style.borderColor = 'var(--warning)';
+  } else {
+    rulesInput.style.borderColor = '';
+  }
 });
 
 saveBtn.addEventListener('click', saveRules);

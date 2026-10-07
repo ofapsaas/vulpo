@@ -396,11 +396,19 @@ async function guardedCommand(cmdName, params, profileId, command) {
 // ============================================================
 function parseRules(text) {
   const result = parseRulesSeam(text);
+
+  // fb-027-001 (P24): la política es warning + carga. Los warnings del seam se
+  // loguean (observables en el log de diagnóstico) y la carga SIEMPRE procede.
+  const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+  for (const w of warnings) {
+    log('warn', `Rules warning [${w.code}] line ${w.line}: ${w.message}`);
+  }
+
   if (!result.ok) {
-    // Fail-loud (D2/P11): no se registra NINGÚN perfil del texto rechazado
-    // (atomicidad, sin aplicación parcial). El error queda en el log.
+    // Defensivo: el seam nuevo no produce ok:false por validación (sólo infra,
+    // bundle stale). No debería alcanzarse.
     log('error', `Invalid rules — no profiles registered: ${result.error}`);
-    return { ok: false, error: result.error, profileIds: [], removed: [] };
+    return { ok: false, error: result.error, profileIds: [], removed: [], warnings };
   }
 
   const seenIds = new Set();
@@ -429,8 +437,8 @@ function parseRules(text) {
     }
   }
 
-  log('info', `Rules parsed: ${seenIds.size} profiles, ${removed.length} removed`);
-  return { ok: true, profileIds: [...seenIds], removed };
+  log('info', `Rules parsed: ${seenIds.size} profiles, ${removed.length} removed, ${warnings.length} warnings`);
+  return { ok: true, profileIds: [...seenIds], removed, warnings };
 }
 
 // ============================================================
@@ -2735,16 +2743,18 @@ browser.runtime.onMessage.addListener((msg, sender) => {
 
   if (msg.type === 'updateRules') {
     if (msg.rules) {
-      const { ok, removed, error } = parseRules(msg.rules);
+      // fb-027-001 (P24): el wrapper loguea los warnings y devuelve éxito; los
+      // perfiles se cargan (first-match). Sólo un fallo de infraestructura
+      // (seam ok:false, bundle stale) reporta error.
+      const { ok, removed, error, warnings } = parseRules(msg.rules);
       if (!ok) {
-        // P11: el punto de entrada de config no reporta éxito si la config es
-        // inválida (el error queda observable, no se traga).
         return Promise.resolve({ success: false, error });
       }
       for (const pid of removed) {
         disconnectProfile(pid);
       }
       reconnectAllProfiles();
+      return Promise.resolve({ success: true, rules: profileList.length, warnings });
     }
     return Promise.resolve({ success: true, rules: profileList.length });
   }
