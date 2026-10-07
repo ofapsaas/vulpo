@@ -24,46 +24,120 @@ var VulpoRules = (() => {
     parseRules: () => parseRules,
     resolveProfile: () => resolveProfile
   });
+  function globToRegexSource(glob) {
+    let out = "";
+    for (let i = 0; i < glob.length; i++) {
+      const c = glob[i];
+      if (c === "*") {
+        if (glob[i + 1] === "*") {
+          out += ".*";
+          i++;
+        } else {
+          out += "[^/]*";
+        }
+      } else if ("\\^$.|?+()[]{}".includes(c)) {
+        out += "\\" + c;
+      } else {
+        out += c;
+      }
+    }
+    return out;
+  }
+  function globRegex(glob) {
+    return new RegExp("^" + globToRegexSource(glob) + "$");
+  }
   function parsePattern(token) {
     if (token === "**") return { catchAll: true, host: null, path: null };
     if (token === "*") return null;
     const slash = token.indexOf("/");
     const hostPart = slash === -1 ? token : token.slice(0, slash);
     const rawPath = slash === -1 ? null : token.slice(slash + 1);
-    if (rawPath !== null && rawPath.includes("*")) return null;
-    const wildcard = hostPart.startsWith("*.");
-    const hostName = wildcard ? hostPart.slice(2) : hostPart;
-    if (!isValidHost(hostName)) return null;
-    const host = { t: wildcard ? "w" : "e", v: hostName.toLowerCase() };
-    const path = rawPath === null ? null : rawPath.replace(/^\/+|\/+$/g, "") || null;
+    const host = parseHost(hostPart);
+    if (host === null) return null;
+    let path = null;
+    if (rawPath !== null) {
+      path = parsePath(rawPath);
+      if (path === null) return null;
+    }
     return { catchAll: false, host, path };
   }
-  function isValidHost(host) {
-    return /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$/.test(
-      host
-    );
+  function parseHost(hostPart) {
+    if (hostPart === "") return null;
+    for (const label of hostPart.split(".")) {
+      if (label === "") return null;
+      if (!/^[A-Za-z0-9*-]+$/.test(label)) return null;
+      if (label.startsWith("-") || label.endsWith("-")) return null;
+    }
+    const lower = hostPart.toLowerCase();
+    if (!/[a-z0-9]/.test(lower)) return null;
+    if (lower.startsWith("*.") && !lower.slice(2).includes("*")) {
+      return { kind: "wild", suffix: lower.slice(2) };
+    }
+    if (lower.includes("*")) return { kind: "glob", source: lower };
+    return { kind: "exact", v: lower };
+  }
+  function parsePath(rawPath) {
+    const p = rawPath.replace(/^\/+|\/+$/g, "");
+    if (p === "") return null;
+    for (const segment of p.split("/")) {
+      if (!/^[^\s?#]+$/.test(segment)) return null;
+    }
+    return p;
   }
   function hostMatches(hostname, host) {
-    if (host.t === "w") return hostname === host.v || hostname.endsWith("." + host.v);
-    return hostname === host.v;
+    if (host.kind === "wild") {
+      return hostname === host.suffix || hostname.endsWith("." + host.suffix);
+    }
+    if (host.kind === "exact") return hostname === host.v;
+    return globRegex(host.source).test(hostname);
   }
-  function pathMatches(pathname, prefix) {
-    if (prefix === null) return true;
-    const p = "/" + prefix;
-    return pathname === p || pathname.startsWith(p + "/");
+  function pathMatches(pathname, path) {
+    if (path === null) return true;
+    return new RegExp("^" + globToRegexSource("/" + path) + "(/.*)?$").test(pathname);
   }
-  function exactInWildcard(h, suffix) {
-    return h === suffix || h.endsWith("." + suffix);
+  function hostCoveredBy(h, pat) {
+    if (pat.kind === "wild") return h === pat.suffix || h.endsWith("." + pat.suffix);
+    if (pat.kind === "glob") return globRegex(pat.source).test(h);
+    if (pat.kind === "exact") return h === pat.v;
+    return false;
+  }
+  function literalPrefix(s) {
+    const i = s.indexOf("*");
+    return i === -1 ? s : s.slice(0, i);
+  }
+  function literalSuffix(s) {
+    const i = s.lastIndexOf("*");
+    return i === -1 ? s : s.slice(i + 1);
+  }
+  function hostLiteralParts(host) {
+    if (host.kind === "exact") return { prefix: host.v, suffix: host.v };
+    if (host.kind === "wild") return { prefix: "", suffix: host.suffix };
+    return { prefix: literalPrefix(host.source), suffix: literalSuffix(host.source) };
+  }
+  function globHostsMayOverlap(a, b) {
+    const { prefix: pa, suffix: sa } = hostLiteralParts(a);
+    const { prefix: pb, suffix: sb } = hostLiteralParts(b);
+    const prefixOk = pa === "" || pb === "" || pa.startsWith(pb) || pb.startsWith(pa);
+    const suffixOk = sa === "" || sb === "" || sa.endsWith(sb) || sb.endsWith(sa);
+    return prefixOk && suffixOk;
   }
   function hostsOverlap(a, b) {
-    if (a.t === "e" && b.t === "e") return a.v === b.v;
-    if (a.t === "e") return exactInWildcard(a.v, b.v);
-    if (b.t === "e") return exactInWildcard(b.v, a.v);
-    return a.v === b.v || a.v.endsWith("." + b.v) || b.v.endsWith("." + a.v);
+    if (a.kind === "exact" && b.kind === "exact") return a.v === b.v;
+    if (a.kind === "exact") return hostCoveredBy(a.v, b);
+    if (b.kind === "exact") return hostCoveredBy(b.v, a);
+    if (a.kind === "wild" && b.kind === "wild") {
+      return a.suffix === b.suffix || a.suffix.endsWith("." + b.suffix) || b.suffix.endsWith("." + a.suffix);
+    }
+    return globHostsMayOverlap(a, b);
   }
   function pathsOverlap(a, b) {
     if (a === null || b === null) return true;
     if (a === b) return true;
+    if (a.includes("*") || b.includes("*")) {
+      const pa = literalPrefix(a);
+      const pb = literalPrefix(b);
+      return pa === pb || pa.startsWith(pb) || pb.startsWith(pa);
+    }
     return a.startsWith(b + "/") || b.startsWith(a + "/");
   }
   function patternsOverlap(a, b) {
@@ -98,66 +172,88 @@ var VulpoRules = (() => {
     return null;
   }
   function parseRules(text) {
-    const lines = String(text).split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
+    const warnings = [];
+    const warn = (code, line, message, detail) => warnings.push({ code, line, message, detail });
+    const rawLines = String(text).split("\n");
     const byId = /* @__PURE__ */ new Map();
     const profiles = [];
-    for (const line of lines) {
+    const scoped = [];
+    let catchAllTaken = false;
+    for (let i = 0; i < rawLines.length; i++) {
+      const line = rawLines[i].trim();
+      const lineNo = i + 1;
+      if (!line || line.startsWith("#")) continue;
       const parts = line.split(/\s+/);
       if (parts.length === 2 && parts[0] === "*" && parts[1] === "None") continue;
       if (parts.length < 3) {
-        return {
-          ok: false,
-          error: `invalid rules line "${line}": expected "bridgeUrl token domain1 domain2 ..."`
-        };
+        warn("invalid_line", lineNo, `invalid rules line "${line}": expected "bridgeUrl token domain1 domain2 ..."`, line);
+        continue;
       }
       const bridgeUrl = parts[0].replace(/\/+$/, "");
       const token = parts[1];
-      const domains = parts.slice(2);
       if (!isValidUrl(bridgeUrl)) {
-        return { ok: false, error: `invalid bridge URL "${parts[0]}" in rules line "${line}"` };
-      }
-      for (const domain of domains) {
-        if (domain === "*") {
-          return {
-            ok: false,
-            error: `invalid domain "*" (line "${line}") \u2014 use "**" for an explicit catch-all`
-          };
-        }
-        if (parsePattern(domain) === null) {
-          return { ok: false, error: `invalid domain "${domain}" (line "${line}") \u2014 not a valid host` };
-        }
-      }
-      if (domains.includes("**") && domains.length > 1) {
-        return { ok: false, error: `"**" must be the only domain of profile "${bridgeUrl}|${token}"` };
+        warn("invalid_line", lineNo, `invalid bridge URL "${parts[0]}" in rules line "${line}"`, parts[0]);
+        continue;
       }
       const id = `${bridgeUrl}|${token}`;
       if (byId.has(id)) {
-        return { ok: false, error: `duplicate profile id "${id}"` };
+        warn("duplicate_id", lineNo, `duplicate profile id "${id}" \u2014 first-wins: se ignora la l\xEDnea posterior`, id);
+        continue;
+      }
+      let domains = [];
+      for (const domain of parts.slice(2)) {
+        const pattern = parsePattern(domain);
+        if (pattern === null) {
+          warn("invalid_domain", lineNo, `invalid domain "${domain}" (line "${line}") \u2014 token descartado`, domain);
+          continue;
+        }
+        domains.push(domain);
+        if (!pattern.catchAll && isBroadGlob(pattern.host)) {
+          warn("broad_glob", lineNo, `broad host glob "${domain}" (line "${line}") \u2014 el perfil carga tal cual; revis\xE1 el alcance`, domain);
+        }
+      }
+      const catchCount = domains.filter((d) => d === "**").length;
+      const scopedDomains = domains.filter((d) => d !== "**");
+      if (catchCount > 0 && (scopedDomains.length > 0 || catchCount > 1)) {
+        warn("catch_all_conflict", lineNo, `"**" must be the only domain of profile "${id}" \u2014 se ignora el catch-all`, id);
+        domains = scopedDomains.length > 0 ? scopedDomains : ["**"];
+      }
+      if (domains.length === 0) {
+        warn("invalid_line", lineNo, `rules line "${line}" has no valid domain \u2014 se saltea la l\xEDnea`, line);
+        continue;
+      }
+      if (domains.length === 1 && domains[0] === "**") {
+        if (catchAllTaken) {
+          warn("catch_all_conflict", lineNo, `at most one "**" catch-all profile is allowed \u2014 se ignora "${id}"`, id);
+          continue;
+        }
+        catchAllTaken = true;
       }
       const profile = { id, bridgeUrl, token, domains: [...domains] };
       byId.set(id, profile);
       profiles.push(profile);
+      if (!domains.includes("**")) {
+        scoped.push({ id, line: lineNo, patterns: domains.map(parsePattern).filter(Boolean) });
+      }
     }
-    const catchAlls = profiles.filter((p) => p.domains.includes("**"));
-    if (catchAlls.length > 1) {
-      return { ok: false, error: 'at most one "**" catch-all profile is allowed' };
-    }
-    const scoped = profiles.filter((p) => !p.domains.includes("**")).map((p) => ({ id: p.id, patterns: p.domains.map(parsePattern).filter(Boolean) }));
     for (let i = 0; i < scoped.length; i++) {
       for (let j = i + 1; j < scoped.length; j++) {
         for (const a of scoped[i].patterns) {
           for (const b of scoped[j].patterns) {
             if (patternsOverlap(a, b)) {
-              return {
-                ok: false,
-                error: `overlapping domains between profiles "${scoped[i].id}" and "${scoped[j].id}"`
-              };
+              warn(
+                "overlap",
+                scoped[j].line,
+                `overlapping domains between profiles "${scoped[i].id}" and "${scoped[j].id}" \u2014 first-match wins: "${scoped[i].id}" prevalece`,
+                `${scoped[i].id} < ${scoped[j].id}`
+              );
             }
           }
         }
       }
     }
-    return { ok: true, profiles };
+    warnings.sort((a, b) => a.line - b.line);
+    return { ok: true, profiles, warnings };
   }
   function isValidUrl(str) {
     try {
@@ -166,6 +262,10 @@ var VulpoRules = (() => {
     } catch {
       return false;
     }
+  }
+  function isBroadGlob(host) {
+    if (host.kind !== "glob") return false;
+    return host.source.split(".")[0].startsWith("*");
   }
   return __toCommonJS(rules_exports);
 })();
