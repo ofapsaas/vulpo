@@ -637,7 +637,9 @@ function connectProfile(profile) {
           },
         };
         guardedCommand(cmdName, msg.params || {}, profile.id, command).then(result => {
-          ws.send(JSON.stringify({ type: 'response', id: msg.id, result }));
+          // P6 (fb-027-005): normaliza undefined→null para que JSON.stringify
+          // nunca omita la clave `result` (handler que devuelve undefined).
+          ws.send(JSON.stringify({ type: 'response', id: msg.id, result: result === undefined ? null : result }));
         }).catch(err => {
           log('error', `Command ${cmdName} failed`, err.message);
           ws.send(JSON.stringify({ type: 'error', id: msg.id, error: err.message }));
