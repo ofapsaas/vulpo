@@ -416,25 +416,24 @@ function parseRules(text) {
     seenIds.add(p.id);
     const profile = getOrCreateProfile(p.id, p.bridgeUrl, p.token);
     profile.domains = p.domains;
-
-    // Add to profileList if not already there (preserve order)
-    if (!profileList.includes(p.id)) {
-      profileList.push(p.id);
-    }
   }
 
-  // Detect removed profiles — disconnect them
+  // Detect removed profiles — disconnect them (contra el orden ANTERIOR).
   const removed = [];
   for (const pid of profileList) {
     if (!seenIds.has(pid)) {
       removed.push(pid);
     }
   }
-  // Clean up removed profiles from profileList
-  for (let i = profileList.length - 1; i >= 0; i--) {
-    if (!seenIds.has(profileList[i])) {
-      profileList.splice(i, 1);
-    }
+
+  // B1 (review Etapa 4): el orden de `result.profiles` ES la prioridad
+  // first-match (spec §2.2, normativa). Se RECONSTRUYE en cada carga; el
+  // append-if-absent conservaba el orden histórico y `getProfileForUrl` podía
+  // resolver un ganador distinto del que declara el warning `overlap`. Un
+  // perfil que desaparece de la config no queda en la lista.
+  profileList.length = 0;
+  for (const p of result.profiles) {
+    profileList.push(p.id);
   }
 
   log('info', `Rules parsed: ${seenIds.size} profiles, ${removed.length} removed, ${warnings.length} warnings`);
